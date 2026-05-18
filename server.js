@@ -1,0 +1,202 @@
+const express = require('express');
+const path = require('path');
+const cors = require('cors');
+const bcrypt = require('bcrypt'); // เพิ่มไลบรารี bcrypt
+const { pool, initDb } = require('./database');
+
+const app = express();
+const PORT = 3000;
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// เริ่มต้นฐานข้อมูล
+initDb();
+
+// --- API สำหรับ SUPER ADMIN ---
+
+// Login สำหรับ Super Admin
+app.post('/api/superadmin/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === 'superadmin' && password === '123456789') {
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ success: false, message: "รหัสผ่านไม่ถูกต้อง" });
+    }
+});
+
+// ดึงสถิติ Dashboard รวม
+app.get('/api/dashboard/stats', async (req, res) => {
+    try {
+        const orgCount = await pool.query('SELECT COUNT(*) FROM organizations');
+        const userCount = await pool.query('SELECT COUNT(*) FROM wifi_users');
+        res.json({ 
+            total_orgs: parseInt(orgCount.rows[0].count), 
+            total_wifi_users: parseInt(userCount.rows[0].count) 
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ดึงรายชื่อองค์กร
+app.get('/api/organizations', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM organizations ORDER BY id DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// เพิ่มองค์กรใหม่ (อัปเดตให้เข้ารหัสผ่านด้วย bcrypt + แก้ไขลอจิกวันหมดอายุ)
+app.post('/api/organizations', async (req, res) => {
+    const { name, org_type, admin_validity_days, user_policy_days } = req.body;
+    const admin_user = "admin_" + Math.random().toString(36).substr(2, 5);
+    
+    // สร้างรหัสผ่านแบบธรรมดา (Plain text) ไว้ก่อน
+    const plain_admin_pass = Math.random().toString(36).slice(-8);
+    
+    let admin_expiry_date = null;
+
+    if (org_type === 'external' && admin_validity_days) {
+        admin_expiry_date = new Date();
+        
+        // 1. คำนวณวันหมดอายุ โดยหักออก 1 วัน (เพราะนับวันที่สร้างเป็นวันที่ 1)
+        admin_expiry_date.setDate(admin_expiry_date.getDate() + (parseInt(admin_validity_days) - 1));
+        
+        // 2. ตั้งเวลาให้เป็นเวลา 23:59:59 ของวันนั้น
+        admin_expiry_date.setHours(23, 59, 59, 999);
+    }
+
+    try {
+        // ทำการเข้ารหัสผ่าน (Hash) โดยใช้ Salt rounds = 10
+        const hashed_admin_pass = await bcrypt.hash(plain_admin_pass, 10);
+
+        // บันทึกรหัสที่ถูก Hash แล้วลงฐานข้อมูล
+        const sql = `INSERT INTO organizations (name, org_type, admin_user, admin_pass, user_policy_days, admin_expiry_date) 
+                     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`;
+        const result = await pool.query(sql, [name, org_type, admin_user, hashed_admin_pass, user_policy_days, admin_expiry_date]);
+        
+        // เตรียมข้อมูลส่งกลับให้หน้าเว็บ (Popup)
+        const responseData = result.rows[0];
+        // เปลี่ยนค่าพาสเวิร์ดใน Response กลับเป็นแบบธรรมดา เพื่อให้ Popup แสดงผลให้คนดูได้ (แต่ใน DB ปลอดภัยแล้ว)
+        responseData.admin_pass = plain_admin_pass;
+
+        res.json({ success: true, data: responseData });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ลบองค์กร
+app.delete('/api/organizations/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM organizations WHERE id = $1', [id]);
+        res.json({ success: true, message: "ลบองค์กรสำเร็จ" });
+    } catch (err) {
+        console.error("Delete Error:", err);
+        res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการลบ" });
+    }
+});
+
+// --- API สำหรับ ADMIN องค์กร (ที่เพื่อนคุณจะเรียกใช้) ---
+
+// ==========================================
+// 1. API Login สำหรับ Admin องค์กร (อัปเดตให้เช็คด้วย bcrypt)
+// ==========================================
+app.post('/api/admin/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    try {
+        // ค้นหาในตาราง organizations โดยดึง admin_pass ออกมาด้วย (ค้นหาแค่ username ก่อน)
+        const query = 'SELECT id, name, org_type, user_policy_days, admin_expiry_date, admin_pass FROM organizations WHERE admin_user = $1';
+        const result = await pool.query(query, [username]);
+
+        if (result.rows.length > 0) {
+            const orgData = result.rows[0];
+
+            // ใช้ bcrypt.compare เทียบรหัสผ่านที่รับมา กับรหัสที่ถูก Hash ไว้ใน Database
+            const isMatch = await bcrypt.compare(password, orgData.admin_pass);
+
+            if (!isMatch) {
+                // ถ้ารหัสไม่ตรง
+                return res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง!" });
+            }
+
+            // เช็คเพิ่มเติม: ถ้าเป็นหน่วยงานภายนอก หมดอายุหรือยัง?
+            if (orgData.org_type === 'external' && orgData.admin_expiry_date && new Date(orgData.admin_expiry_date) < new Date()) {
+                return res.status(403).json({ success: false, message: "บัญชีผู้ดูแลระบบนี้หมดอายุการใช้งานแล้ว!" });
+            }
+
+            // ล็อกอินสำเร็จ ส่งข้อมูลกลับไปให้เพื่อนคุณใช้ต่อ
+            res.json({
+                success: true,
+                message: "ล็อกอินเข้าสู่ระบบสำเร็จ",
+                data: {
+                    org_id: orgData.id,
+                    org_name: orgData.name,
+                    org_type: orgData.org_type,
+                    user_policy_days: orgData.user_policy_days
+                }
+            });
+        } else {
+            // ไม่พบ Username
+            res.status(401).json({
+                success: false,
+                message: "Username หรือ Password ไม่ถูกต้อง!"
+            });
+        }
+    } catch (err) {
+        console.error("Admin Login Error:", err);
+        res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์" });
+    }
+});
+
+// 2. บันทึก User Wi-Fi ใหม่ และอัปเดตสถิติ
+app.post('/api/admin/issue-wifi', async (req, res) => {
+    const { org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card } = req.body;
+    
+    try {
+        await pool.query('BEGIN');
+
+        // บันทึกลงตาราง wifi_users
+        const userSql = `INSERT INTO wifi_users (org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card) 
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+        await pool.query(userSql, [org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card]);
+
+        // อัปเดตสถิติ
+        const statsSql = `
+            INSERT INTO admin_stats (org_id, issue_date, total_issued)
+            VALUES ($1, CURRENT_DATE, 1)
+            ON CONFLICT (org_id, issue_date) 
+            DO UPDATE SET total_issued = admin_stats.total_issued + 1;
+        `;
+        await pool.query(statsSql, [org_id]);
+
+        await pool.query('COMMIT');
+        res.json({ success: true, message: "ออกรหัสสำเร็จและบันทึกสถิติแล้ว" });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// --- ระบบตั้งเวลาลบข้อมูลอัตโนมัติ (Cleanup) ---
+
+setInterval(async () => {
+    try {
+        const delUsers = await pool.query("DELETE FROM wifi_users WHERE created_at < NOW() - INTERVAL '90 days'");
+        const delOrgs = await pool.query("DELETE FROM organizations WHERE org_type = 'external' AND admin_expiry_date <= NOW()");
+        
+        if (delUsers.rowCount > 0 || delOrgs.rowCount > 0) {
+            console.log(`🧹 Cleanup done: Removed ${delUsers.rowCount} users and ${delOrgs.rowCount} expired orgs`);
+        }
+    } catch (err) {
+        console.error("Cleanup error:", err);
+    }
+}, 60000);
+
+app.listen(PORT, () => console.log(`🚀 PostgreSQL Server running on http://localhost:${PORT}`));

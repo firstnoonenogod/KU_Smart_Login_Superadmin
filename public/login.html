@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | KU Super Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Krub:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            background-color: #f4f7f6;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            max-width: 400px;
+            width: 100%;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card shadow-lg border-0 login-card">
+        <div class="card-header ku-navbar text-white text-center py-4 border-0">
+            <h4 class="mb-0 fw-bold">Super Admin Login</h4>
+            <small class="text-white-50">KU Wi-Fi SmartLogin</small>
+        </div>
+        <div class="card-body p-4 bg-white">
+            <form id="loginForm">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold text-muted">Username</label>
+                    <input type="text" id="username" class="form-control form-control-lg bg-light" required>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label fw-semibold text-muted">Password</label>
+                    <input type="password" id="password" class="form-control form-control-lg bg-light" required>
+                </div>
+                <button type="submit" class="btn btn-ku btn-lg w-100 rounded-pill shadow-sm">เข้าสู่ระบบ</button>
+            </form>
+            <div id="errorMsg" class="text-danger text-center mt-3" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+
+            try {
+                const res = await fetch('/api/superadmin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+
+                const result = await res.json();
+                
+                if(result.success) {
+                    // ล็อคอินผ่าน ให้จำค่าไว้ในเบราว์เซอร์แล้วพาไปหน้า index
+                    sessionStorage.setItem('isSuperAdmin', 'true');
+                    window.location.href = 'index.html';
+                } else {
+                    const errorDiv = document.getElementById('errorMsg');
+                    errorDiv.innerText = result.message;
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                alert("เซิร์ฟเวอร์มีปัญหา");
+            }
+        });
+    </script>
+</body>
+</html>
