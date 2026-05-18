@@ -66,11 +66,64 @@ async function fetchOrganizations() {
 // ระบบจัดการ Popup (แทนที่ alert/confirm เดิม)
 // ----------------------------------------------------
 
-// [Popup] ฟังก์ชันสำหรับเปิดกล่อง "ดูข้อมูล"
-function viewOrgDetails(id) {
-    document.getElementById('viewModalOrgId').innerText = id;
+// [Popup] ฟังก์ชันสำหรับเปิดกล่อง "ดูข้อมูล Dashboard"
+async function viewOrgDetails(id) {
+    // ล้างข้อมูลตารางเป็น Loading ก่อน
+    const tbody = document.getElementById('dash-history-body');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm text-success" role="status"></div> กำลังโหลดข้อมูล...</td></tr>';
+    
+    // เปิด Popup
     const viewModal = new bootstrap.Modal(document.getElementById('viewModal'));
     viewModal.show();
+
+    try {
+        // ยิงไปขอข้อมูลจาก API ที่เราเพิ่งเขียน
+        const res = await fetch(`/api/dashboard/org/${id}`);
+        const data = await res.json();
+        
+        if(data.success) {
+            // ยัดตัวเลขลงกล่องสถิติ
+            document.getElementById('dash-today').innerText = data.stats.today;
+            document.getElementById('dash-week').innerText = data.stats.this_week;
+            document.getElementById('dash-month').innerText = data.stats.this_month;
+            document.getElementById('dash-3month').innerText = data.stats.three_months;
+            document.getElementById('dash-active').innerText = data.activeCount;
+            document.getElementById('dash-inactive').innerText = data.inactiveCount;
+
+            // วาดตารางประวัติ
+            tbody.innerHTML = '';
+            if(data.history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">ยังไม่มีประวัติการออกบัตรสำหรับองค์กรนี้</td></tr>';
+            } else {
+                data.history.forEach(user => {
+                    const createDate = new Date(user.created_at).toLocaleString('th-TH');
+                    
+                    // ป้ายสถานะ
+                    const statusBadge = user.status === 'Active' 
+                        ? '<span class="badge bg-success">Active</span>'
+                        : '<span class="badge bg-secondary">Inactive</span>';
+
+                    // 🔒 ซ่อนเลขบัตรประชาชนตรงกลางเพื่อ PDPA (ความปลอดภัยข้อมูลส่วนบุคคล)
+                    const hiddenIdCard = user.id_card && user.id_card.length === 13 
+                        ? user.id_card.substring(0, 3) + 'XXXXXXX' + user.id_card.substring(10) 
+                        : '-';
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${user.fname_th || '-'} ${user.lname_th || ''}</td>
+                            <td>${hiddenIdCard}</td>
+                            <td><span class="badge bg-light text-dark border">${user.username}</span></td>
+                            <td>${createDate}</td>
+                            <td>${statusBadge}</td>
+                        </tr>
+                    `;
+                });
+            }
+        }
+    } catch (error) {
+        console.error("Fetch Dashboard Error:", error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">เกิดข้อผิดพลาดในการโหลดข้อมูลเซิร์ฟเวอร์</td></tr>';
+    }
 }
 
 // ตัวแปรเก็บ ID ชั่วคราวตอนกดปุ่มลบ

@@ -184,6 +184,71 @@ app.post('/api/admin/issue-wifi', async (req, res) => {
     }
 });
 
+// API สำหรับดึงข้อมูล Dashboard ของแต่ละองค์กร 
+app.get('/api/dashboard/org/:id', async (req, res) => {
+    const orgId = req.params.id;
+    try {
+        // 1. ดึงข้อมูลองค์กร (เพื่อเอา user_policy_days มาคิดวันหมดอายุ Active/Inactive)
+        const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE id = $1', [orgId]);
+        if (orgRes.rows.length === 0) return res.status(404).json({ error: "ไม่พบองค์กร" });
+        const policyDays = orgRes.rows[0].user_policy_days;
+
+        // 2. ดึงสถิติ วันนี้, สัปดาห์นี้, เดือนนี้, 3 เดือน
+        const statsQuery = await pool.query(`
+            SELECT 
+                COALESCE(SUM(CASE WHEN issue_date = CURRENT_DATE THEN total_issued ELSE 0 END), 0) as today,
+                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '7 days' THEN total_issued ELSE 0 END), 0) as this_week,
+                COALESCE(SUM(CASE WHEN issue_date >= date_trunc('month', CURRENT_DATE) THEN total_issued ELSE 0 END), 0) as this_month,
+                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '3 months' THEN total_issued ELSE 0 END), 0) as three_months
+            FROM admin_stats 
+            WHERE org_id = $1
+        `, [orgId]);
+
+        // 3. ดึงประวัติการออกบัตร (เรียงจากล่าสุดลงไป)
+        const historyQuery = await pool.query(`
+            SELECT fname_th, lname_th, id_card, username, created_at 
+            FROM wifi_users 
+            WHERE org_id = $1 
+            ORDER BY created_at DESC
+        `, [orgId]);
+
+        // 4. คำนวณ Active / Inactive จากวันที่สร้าง + จำนวนวัน Policy
+        let activeCount = 0;
+        let inactiveCount = 0;
+        const now = new Date();
+        
+        const historyList = historyQuery.rows.map(user => {
+            const createdDate = new Date(user.created_at);
+            // คำนวณเวลาหมดอายุบัตร
+            const expireDate = new Date(createdDate.getTime() + (policyDays * 24 * 60 * 60 * 1000));
+            
+            let status = 'Inactive';
+            if (now <= expireDate) {
+                status = 'Active';
+                activeCount++;
+            } else {
+                inactiveCount++;
+            }
+
+            return {
+                ...user,
+                status: status
+            };
+        });
+
+        res.json({
+            success: true,
+            stats: statsQuery.rows[0],
+            activeCount,
+            inactiveCount,
+            history: historyList
+        });
+    } catch (err) {
+        console.error("Dashboard Error:", err);
+        res.status(500).json({ error: "Database error" });
+    }
+});
+
 // --- ระบบตั้งเวลาลบข้อมูลอัตโนมัติ (Cleanup) ---
 
 setInterval(async () => {

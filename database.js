@@ -3,7 +3,7 @@ const { Pool } = require('pg');
 // ตั้งค่าการเชื่อมต่อ PostgreSQL (ปรับเปลี่ยนตามเครื่องของคุณ)
 const pool = new Pool({
     user: 'postgres',
-    host: 'localhost',
+    host: process.env.DB_HOST || 'localhost',
     database: 'ku_wifi_db', // ต้องไปสร้าง database ชื่อนี้ใน pgAdmin ก่อน
     password: '12345678', 
     port: 5432,
