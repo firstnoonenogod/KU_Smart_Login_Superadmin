@@ -155,7 +155,7 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
         fetchOrganizations(); // โหลดตารางใหม่
         fetchStats();         // อัปเดตตัวเลข
     } else {
-        alert("เกิดข้อผิดพลาดในการลบ: " + result.message);
+        alert("ไม่สามารถสร้างองค์กรได้: " + (result.message || "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์"));
     }
 });
 
