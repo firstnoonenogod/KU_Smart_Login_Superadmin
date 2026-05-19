@@ -267,33 +267,6 @@ app.get('/api/dashboard/org/:id', async (req, res) => {
     }
 });
 
-// ---  API สำหรับรับข้อมูลจากตู้ Kiosk เพื่อบันทึกประวัติการออกรหัส ---
-app.post('/api/admin/issue-wifi', async (req, res) => {
-    const { org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card } = req.body;
-    
-    try {
-        // บันทึกผู้ใช้ลงตาราง wifi_users
-        await pool.query(`
-            INSERT INTO wifi_users (org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card]);
-
-        // (ถ้าเพื่อนมีตาราง admin_stats) อัปเดตสถิติรายวัน
-        await pool.query(`
-            INSERT INTO admin_stats (org_id, issue_date, total_issued)
-            VALUES ($1, CURRENT_DATE, 1)
-            ON CONFLICT (org_id, issue_date)
-            DO UPDATE SET total_issued = admin_stats.total_issued + 1;
-        `, [org_id]);
-
-        console.log(`✅ ออกรหัส Wi-Fi สำเร็จ: ${username}`);
-        res.json({ success: true, message: "บันทึกผู้ใช้สำเร็จ" });
-    } catch (err) {
-        console.error("Issue Wi-Fi Error:", err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
 // --- ระบบตั้งเวลาลบข้อมูลอัตโนมัติ (Cleanup) ---
 
 setInterval(async () => {
