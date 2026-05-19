@@ -156,31 +156,49 @@ app.post('/api/admin/login', async (req, res) => {
 });
 
 // 2. บันทึก User Wi-Fi ใหม่ และอัปเดตสถิติ
+// ---  API สำหรับรับข้อมูลจากตู้ Kiosk (อัปเดตใหม่ ป้องกันคนซ้ำ) ---
 app.post('/api/admin/issue-wifi', async (req, res) => {
     const { org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card } = req.body;
     
     try {
-        await pool.query('BEGIN');
+        // 1. ตรวจสอบว่ามีผู้ใช้งานนี้ (เลขบัตรนี้) ในองค์กรนี้อยู่แล้วหรือไม่
+        const existingUser = await pool.query(
+            'SELECT * FROM wifi_users WHERE org_id = $1 AND id_card = $2',
+            [org_id, id_card]
+        );
 
-        // บันทึกลงตาราง wifi_users
-        const userSql = `INSERT INTO wifi_users (org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card) 
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
-        await pool.query(userSql, [org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card]);
+        if (existingUser.rows.length > 0) {
+            // กรณีที่ 1: มีคนนี้อยู่แล้ว -> แค่อัปเดต Username/Password และเวลาให้ใหม่ (ไม่บวกสถิติ)
+            await pool.query(`
+                UPDATE wifi_users 
+                SET username = $1, password = $2, created_at = CURRENT_TIMESTAMP
+                WHERE org_id = $3 AND id_card = $4
+            `, [username, password, org_id, id_card]);
+            
+            console.log(`♻️ อัปเดตข้อมูลผู้ใช้เดิม (มาขอซ้ำ): ${fname_th} ${lname_th}`);
+            
+        } else {
+            // กรณีที่ 2: เป็นผู้ใช้งานใหม่ -> บันทึกชื่อลงฐานข้อมูล และบวกสถิติ
+            await pool.query(`
+                INSERT INTO wifi_users (org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `, [org_id, username, password, fname_th, lname_th, fname_en, lname_en, id_card]);
 
-        // อัปเดตสถิติ
-        const statsSql = `
-            INSERT INTO admin_stats (org_id, issue_date, total_issued)
-            VALUES ($1, CURRENT_DATE, 1)
-            ON CONFLICT (org_id, issue_date) 
-            DO UPDATE SET total_issued = admin_stats.total_issued + 1;
-        `;
-        await pool.query(statsSql, [org_id]);
+            // อัปเดตสถิติรายวัน (บวกเพิ่ม 1)
+            await pool.query(`
+                INSERT INTO admin_stats (org_id, issue_date, total_issued)
+                VALUES ($1, CURRENT_DATE, 1)
+                ON CONFLICT (org_id, issue_date)
+                DO UPDATE SET total_issued = admin_stats.total_issued + 1;
+            `, [org_id]);
+            
+            console.log(`✅ ออกรหัส Wi-Fi ใหม่สำเร็จ: ${username}`);
+        }
 
-        await pool.query('COMMIT');
-        res.json({ success: true, message: "ออกรหัสสำเร็จและบันทึกสถิติแล้ว" });
+        res.json({ success: true, message: "บันทึกผู้ใช้สำเร็จ" });
     } catch (err) {
-        await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, message: err.message });
+        console.error("Issue Wi-Fi Error:", err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 

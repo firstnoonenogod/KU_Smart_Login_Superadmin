@@ -209,3 +209,11 @@ window.onload = () => {
     fetchStats();
     fetchOrganizations();
 };
+
+setInterval(() => {
+    // ถ้าหน้าต่าง Popup (Modal) ไม่ได้เปิดอยู่ ค่อยโหลดข้อมูลใหม่ เพื่อไม่ให้ขัดจังหวะการใช้งาน
+    if (!document.body.classList.contains('modal-open')) {
+        fetchStats();
+        fetchOrganizations();
+    }
+}, 5000);
