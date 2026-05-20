@@ -237,39 +237,68 @@ app.post('/api/admin/issue-wifi', async (req, res) => {
 app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
     const orgId = req.params.id;
     try {
-        const whereClause = orgId === 'all' ? '' : `WHERE u.org_id = ${parseInt(orgId)}`;
-        const statsWhereClause = orgId === 'all' ? '' : `WHERE org_id = ${parseInt(orgId)}`;
+        let statsQuery;
+        let historyQuery;
 
-        const statsQuery = await pool.query(`
-            SELECT 
-                COALESCE(SUM(CASE WHEN date = CURRENT_DATE THEN count ELSE 0 END), 0) as today,
-                COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN count ELSE 0 END), 0) as this_week,
-                COALESCE(SUM(CASE WHEN date >= date_trunc('month', CURRENT_DATE) THEN count ELSE 0 END), 0) as this_month,
-                COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '3 months' THEN count ELSE 0 END), 0) as three_months
-            FROM admin_stat 
-            ${statsWhereClause}
-        `);
+        // แยกเงื่อนไข: กรณีขอดู "ทั้งหมด (all)" ไม่ต้องใส่ WHERE org_id
+        if (orgId === 'all') {
+            statsQuery = await pool.query(`
+                SELECT 
+                    COALESCE(SUM(CASE WHEN date = CURRENT_DATE THEN count ELSE 0 END), 0) as today,
+                    COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN count ELSE 0 END), 0) as this_week,
+                    COALESCE(SUM(CASE WHEN date >= date_trunc('month', CURRENT_DATE) THEN count ELSE 0 END), 0) as this_month,
+                    COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '3 months' THEN count ELSE 0 END), 0) as three_months
+                FROM admin_stat 
+            `);
 
-        const historyQuery = await pool.query(`
-            SELECT 
-                u.card_id as id_card, 
-                u.username, 
-                c.create_time as created_at, 
-                c.expire_time,
-                COALESCE(o.org_name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
-            FROM wifi_users u
-            JOIN wifi_credentials c ON u.id = c.user_id
-            LEFT JOIN organizations o ON u.org_id = o.org_id
-            ${whereClause}
-            ORDER BY c.create_time DESC
-        `);
+            historyQuery = await pool.query(`
+                SELECT 
+                    u.card_id as id_card, 
+                    u.username, 
+                    c.create_time as created_at, 
+                    c.expire_time,
+                    COALESCE(o.org_name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
+                FROM wifi_users u
+                JOIN wifi_credentials c ON u.id = c.user_id
+                LEFT JOIN organizations o ON u.org_id = o.org_id
+                ORDER BY c.create_time DESC
+            `);
+        } 
+        // แยกเงื่อนไข: กรณีดูเฉพาะองค์กร (มีส่งเลข ID มา) ใช้ WHERE org_id = $1
+        else {
+            statsQuery = await pool.query(`
+                SELECT 
+                    COALESCE(SUM(CASE WHEN date = CURRENT_DATE THEN count ELSE 0 END), 0) as today,
+                    COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN count ELSE 0 END), 0) as this_week,
+                    COALESCE(SUM(CASE WHEN date >= date_trunc('month', CURRENT_DATE) THEN count ELSE 0 END), 0) as this_month,
+                    COALESCE(SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '3 months' THEN count ELSE 0 END), 0) as three_months
+                FROM admin_stat 
+                WHERE org_id = $1
+            `, [orgId]);
 
+            historyQuery = await pool.query(`
+                SELECT 
+                    u.card_id as id_card, 
+                    u.username, 
+                    c.create_time as created_at, 
+                    c.expire_time,
+                    COALESCE(o.org_name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
+                FROM wifi_users u
+                JOIN wifi_credentials c ON u.id = c.user_id
+                LEFT JOIN organizations o ON u.org_id = o.org_id
+                WHERE u.org_id = $1
+                ORDER BY c.create_time DESC
+            `, [orgId]);
+        }
+
+        // นำข้อมูลมาคำนวณสถานะ Active / Inactive
         let activeCount = 0;
         let inactiveCount = 0;
         const now = new Date();
         
         const historyList = historyQuery.rows.map(user => {
             let status = 'Inactive';
+            // อิงจาก expire_time ในตาราง wifi_credentials ได้ตรงๆ เลย 
             if (now <= new Date(user.expire_time)) {
                 status = 'Active';
                 activeCount++;
@@ -287,6 +316,7 @@ app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
             history: historyList
         });
     } catch (err) {
+        console.error("Dashboard Error:", err);
         res.status(500).json({ error: "Database error" });
     }
 });
