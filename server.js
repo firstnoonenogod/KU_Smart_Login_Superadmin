@@ -8,7 +8,7 @@ const { pool, initDb } = require('./database');
 const app = express();
 const PORT = 3000;
 
-const SUPER_HASH = process.env.SUPER_ADMIN_HASH;
+const SUPER_HASH = process.env.SUPERADMIN_PASS;
 
 app.use(cors({
     origin: ['http://158.108.217.46:8000', 'http://localhost:8000', 'http://158.108.217.46:3000', 'http://localhost:3000']
@@ -127,71 +127,14 @@ app.post('/api/organizations', requireSuperAdmin, async (req, res) => {
 });
 
 // ลบองค์กร
-app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
-    const orgId = req.params.id;
+app.delete('/api/organizations/:id', requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
     try {
-        let policyDays = 1;
-        
-        if (orgId !== 'all') {
-            const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE id = $1', [orgId]);
-            if (orgRes.rows.length > 0) {
-                policyDays = orgRes.rows[0].user_policy_days;
-            }
-        }
-
-        // ค้นหาตาม Org ID ปกติ หรือค้นหาทั้งหมดถ้าส่งค่า 'all' มา
-        const whereClause = orgId === 'all' ? '' : `WHERE org_id = ${parseInt(orgId)}`;
-        const statsWhereClause = orgId === 'all' ? '' : `WHERE org_id = ${parseInt(orgId)}`;
-
-        // ดึงสถิติแยกตามช่วงเวลา
-        const statsQuery = await pool.query(`
-            SELECT 
-                COALESCE(SUM(CASE WHEN issue_date = CURRENT_DATE THEN total_issued ELSE 0 END), 0) as today,
-                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '7 days' THEN total_issued ELSE 0 END), 0) as this_week,
-                COALESCE(SUM(CASE WHEN issue_date >= date_trunc('month', CURRENT_DATE) THEN total_issued ELSE 0 END), 0) as this_month,
-                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '3 months' THEN total_issued ELSE 0 END), 0) as three_months
-            FROM admin_stats 
-            ${statsWhereClause}
-        `);
-
-        // ดึงประวัติผู้ใช้งาน (ดึงชื่อองค์กรพ่วงมาโชว์ด้วย เผื่อกรณีองค์กรถูกลบจะขึ้นว่า "องค์กรที่ถูกลบ")
-        const historyQuery = await pool.query(`
-            SELECT u.fname_th, u.lname_th, u.id_card, u.username, u.created_at, COALESCE(o.name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
-            FROM wifi_users u
-            LEFT JOIN organizations o ON u.org_id = o.id
-            ${whereClause}
-            ORDER BY u.created_at DESC
-        `);
-
-        let activeCount = 0;
-        let inactiveCount = 0;
-        const now = new Date();
-        
-        const historyList = historyQuery.rows.map(user => {
-            const createdDate = new Date(user.created_at);
-            const expireDate = new Date(createdDate.getTime() + (policyDays * 24 * 60 * 60 * 1000));
-            
-            let status = 'Inactive';
-            if (now <= expireDate) {
-                status = 'Active';
-                activeCount++;
-            } else {
-                inactiveCount++;
-            }
-
-            return { ...user, status };
-        });
-
-        res.json({
-            success: true,
-            stats: statsQuery.rows[0],
-            activeCount,
-            inactiveCount,
-            history: historyList
-        });
+        await pool.query('DELETE FROM organizations WHERE id = $1', [id]);
+        res.json({ success: true, message: "ลบองค์กรสำเร็จ" });
     } catch (err) {
-        console.error("Dashboard Error:", err);
-        res.status(500).json({ error: "Database error" });
+        console.error("Delete Error:", err);
+        res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการลบ" });
     }
 });
 
@@ -296,7 +239,7 @@ app.post('/api/admin/issue-wifi', async (req, res) => {
 });
 
 // API สำหรับดึงข้อมูล Dashboard ของแต่ละองค์กร 
-app.get('/api/dashboard/org/:id', async (req, res) => {
+app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
     const orgId = req.params.id;
     try {
         // 1. ดึงข้อมูลองค์กร (เพื่อเอา user_policy_days มาคิดวันหมดอายุ Active/Inactive)
