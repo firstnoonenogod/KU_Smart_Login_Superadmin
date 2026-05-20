@@ -416,6 +416,23 @@ function shortcutToAnalytics(orgId) {
     });
 }
 
+// ====================================================
+// ระบบออกจากระบบ (Logout)
+// ====================================================
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    // 1. ถามยืนยัน
+    if (confirm('คุณต้องการออกจากระบบใช่หรือไม่?')) {
+        // 2. เคลียร์ Token ของ Super Admin ทิ้ง
+        sessionStorage.removeItem('superAdminToken');
+        
+        // 3. (Optional) ล้างข้อมูล Session ทั้งหมดเพื่อความชัวร์ 100%
+        sessionStorage.clear();
+        
+        // 4. เตะกลับไปหน้า Login
+        window.location.href = 'login.html';
+    }
+});
+
 setInterval(() => {
     // ถ้าหน้าต่าง Popup (Modal) ไม่ได้เปิดอยู่ ค่อยโหลดข้อมูลใหม่ เพื่อไม่ให้ขัดจังหวะการใช้งาน
     if (!document.body.classList.contains('modal-open')) {
