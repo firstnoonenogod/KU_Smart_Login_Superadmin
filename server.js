@@ -70,16 +70,25 @@ app.get('/api/dashboard/stats', requireSuperAdmin, async (req, res) => {
     }
 });
 
-// ดึงรายชื่อองค์กรทั้งหมด
+// ดึงรายชื่อองค์กรทั้งหมด (พร้อมนับจำนวนยอดผู้ใช้งานจริงรายองค์กร)
 app.get('/api/organizations', requireSuperAdmin, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM organizations ORDER BY org_id DESC');
+        const query = `
+            SELECT o.org_id, o.org_name, o.org_type, o.admin_user, o.user_policy_days,
+                   COUNT(u.id)::int as user_count
+            FROM organizations o
+            LEFT JOIN wifi_users u ON o.org_id = u.org_id
+            GROUP BY o.org_id
+            ORDER BY o.org_id DESC
+        `;
+        const result = await pool.query(query);
         const formatted = result.rows.map(row => ({
             id: row.org_id,
             name: row.org_name,
             org_type: row.org_type ? 'internal' : 'external',
             admin_user: row.admin_user,
-            user_policy_days: row.user_policy_days
+            user_policy_days: row.user_policy_days,
+            user_count: row.user_count
         }));
         res.json(formatted);
     } catch (err) {
