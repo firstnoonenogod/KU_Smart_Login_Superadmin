@@ -1,11 +1,14 @@
-if (sessionStorage.getItem('isSuperAdmin') !== 'true') {
+const token = sessionStorage.getItem('superAdminToken');
+if (!token) {
     window.location.href = 'login.html'; 
 }
 
 // 1. ฟังก์ชันดึงสถิติตัวเลขด้านบน
 async function fetchStats() {
     try {
-        const res = await fetch('/api/dashboard/stats');
+        const res = await fetch('/api/dashboard/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
         const data = await res.json();
         document.getElementById('stat-orgs').innerText = data.total_orgs;
         document.getElementById('stat-users').innerText = data.total_wifi_users;
@@ -32,11 +35,19 @@ radios.forEach(radio => {
 
 // 3. ฟังก์ชันดึงข้อมูลองค์กรมาแสดงในตาราง
 async function fetchOrganizations() {
-    const res = await fetch('/api/organizations');
+    const res = await fetch('/api/organizations', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
     const orgs = await res.json();
     
     const tbody = document.getElementById('org-table-body');
     tbody.innerHTML = '';
+
+    function esc(str) {
+        return String(str ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
     
     orgs.forEach(org => {
         let typeBadge = org.org_type === 'internal' 
@@ -49,8 +60,8 @@ async function fetchOrganizations() {
 
         tbody.innerHTML += `
             <tr>
-                <td class="px-4">${org.name} <br> ${typeBadge}</td>
-                <td><span class="badge bg-secondary">${org.admin_user}</span></td>
+                <td class="px-4">${esc(org.name)} <br> ${typeBadge}</td>
+                <td><span class="badge bg-secondary">${esc(org.admin_user)}</span></td>
                 <td>ให้ User ละ ${org.user_policy_days} วัน</td>
                 <td>${expiryText}</td>
                 <td class="text-center">
@@ -78,7 +89,9 @@ async function viewOrgDetails(id) {
 
     try {
         // ยิงไปขอข้อมูลจาก API ที่เราเพิ่งเขียน
-        const res = await fetch(`/api/dashboard/org/${id}`);
+        const res = await fetch(`/api/dashboard/org/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
         const data = await res.json();
         
         if(data.success) {
@@ -147,7 +160,8 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
 
     // ดำเนินการลบข้อมูลผ่าน API
     const res = await fetch(`/api/organizations/${currentDeleteId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
     });
     
     const result = await res.json();
@@ -176,7 +190,7 @@ document.getElementById('addOrgForm').addEventListener('submit', async (e) => {
 
     const res = await fetch('/api/organizations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' , 'Authorization': `Bearer ${token}`},
         body: JSON.stringify(payload)
     });
 

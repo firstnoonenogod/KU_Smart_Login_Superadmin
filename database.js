@@ -2,11 +2,11 @@ const { Pool } = require('pg');
 
 // ตั้งค่าการเชื่อมต่อ PostgreSQL (ปรับเปลี่ยนตามเครื่องของคุณ)
 const pool = new Pool({
-    user: 'postgres',
-    host: process.env.DB_HOST || 'localhost',
-    database: 'ku_wifi_db', // ต้องไปสร้าง database ชื่อนี้ใน pgAdmin ก่อน
-    password: '12345678', 
-    port: 5432,
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT || 5432,
 });
 
 const initDb = async () => {

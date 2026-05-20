@@ -2,32 +2,62 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const bcrypt = require('bcrypt'); // เพิ่มไลบรารี bcrypt
+const jwt = require('jsonwebtoken');
 const { pool, initDb } = require('./database');
 
 const app = express();
 const PORT = 3000;
 
-app.use(cors());
+const SUPER_HASH = process.env.SUPER_ADMIN_HASH;
+
+app.use(cors({
+    origin: ['http://158.108.217.46:8000', 'http://localhost:8000', 'http://158.108.217.46:3000', 'http://localhost:3000']
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // เริ่มต้นฐานข้อมูล
 initDb();
 
-// --- API สำหรับ SUPER ADMIN ---
+function requireSuperAdmin(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: "Unauthorized: ไม่พบ Token" });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    try { 
+        // เช็คว่า Token ถูกต้องและยังไม่หมดอายุใช่ไหม
+        jwt.verify(token, process.env.JWT_SECRET); 
+        next(); // ผ่านได้!
+    } catch (err) { 
+        res.status(401).json({ success: false, message: 'Unauthorized: Token หมดอายุหรือไม่ถูกต้อง' }); 
+    }
+}
 
 // Login สำหรับ Super Admin
-app.post('/api/superadmin/login', (req, res) => {
+app.post('/api/superadmin/login', async (req, res) => {
     const { username, password } = req.body;
-    if (username === 'superadmin' && password === '123456789') {
-        res.json({ success: true });
-    } else {
-        res.status(401).json({ success: false, message: "รหัสผ่านไม่ถูกต้อง" });
+    
+    // 1. เช็ค Username
+    if (username !== process.env.SUPERADMIN_USER) {
+        return res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง" });
     }
+    
+    // 2. เช็ค Password กับ Hash
+    const isMatch = await bcrypt.compare(password, SUPER_HASH);
+    if (!isMatch) {
+        return res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง" });
+    }
+    
+    // 3. รหัสถูกปุ๊บ ออกบัตรผ่าน (Token) ให้เลย มีอายุ 8 ชั่วโมง
+    const token = jwt.sign({ role: 'superadmin' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    
+    res.json({ success: true, token: token });
 });
 
 // ดึงสถิติ Dashboard รวม
-app.get('/api/dashboard/stats', async (req, res) => {
+app.get('/api/dashboard/stats', requireSuperAdmin, async (req, res) => {
     try {
         const orgCount = await pool.query('SELECT COUNT(*) FROM organizations');
         const userCount = await pool.query('SELECT COUNT(*) FROM wifi_users');
@@ -41,7 +71,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
 });
 
 // ดึงรายชื่อองค์กร
-app.get('/api/organizations', async (req, res) => {
+app.get('/api/organizations', requireSuperAdmin, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM organizations ORDER BY id DESC');
         res.json(result.rows);
@@ -51,7 +81,7 @@ app.get('/api/organizations', async (req, res) => {
 });
 
 // เพิ่มองค์กรใหม่ (อัปเดตให้เข้ารหัสผ่านด้วย bcrypt + แก้ไขลอจิกวันหมดอายุ)
-app.post('/api/organizations', async (req, res) => {
+app.post('/api/organizations', requireSuperAdmin, async (req, res) => {
     const { name, org_type, admin_validity_days, user_policy_days } = req.body;
     const admin_user = "admin_" + Math.random().toString(36).substr(2, 5);
     
@@ -91,7 +121,7 @@ app.post('/api/organizations', async (req, res) => {
 });
 
 // ลบองค์กร
-app.delete('/api/organizations/:id', async (req, res) => {
+app.delete('/api/organizations/:id', requireSuperAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         await pool.query('DELETE FROM organizations WHERE id = $1', [id]);

@@ -63,7 +63,7 @@
                 
                 if(result.success) {
                     // ล็อคอินผ่าน ให้จำค่าไว้ในเบราว์เซอร์แล้วพาไปหน้า index
-                    sessionStorage.setItem('isSuperAdmin', 'true');
+                    sessionStorage.setItem('superAdminToken', result.token);
                     window.location.href = 'index.html';
                 } else {
                     const errorDiv = document.getElementById('errorMsg');
