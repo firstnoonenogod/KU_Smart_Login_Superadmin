@@ -39,6 +39,10 @@ function requireSuperAdmin(req, res, next) {
 app.post('/api/superadmin/login', async (req, res) => {
     const { username, password } = req.body;
     
+    console.log("👉 User พิมพ์:", username, password);
+    console.log("👉 ระบบจำ User:", process.env.SUPERADMIN_USER);
+    console.log("👉 ระบบจำ Hash:", SUPER_HASH);
+
     // 1. เช็ค Username
     if (username !== process.env.SUPERADMIN_USER) {
         return res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง" });
