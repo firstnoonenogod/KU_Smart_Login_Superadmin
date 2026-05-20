@@ -11,48 +11,79 @@ const pool = new Pool({
 
 const initDb = async () => {
     try {
-        // 1. สร้างตารางองค์กร (ถ้ายังไม่มี)
+        // [ข้อควรระวัง] หากรันบนระบบจริงที่เก่า ให้ Drop ตารางเดิมทิ้งก่อน (เฉพาะตอนอัปเกรดระบบ)
+        // await pool.query('DROP TABLE IF EXISTS admin_stats, wifi_users, organizations CASCADE;');
+
+        // 1. ตารางองค์กร
         await pool.query(`
             CREATE TABLE IF NOT EXISTS organizations (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                org_type VARCHAR(50) NOT NULL,
-                admin_user VARCHAR(100) UNIQUE NOT NULL,
-                admin_pass VARCHAR(100) NOT NULL,
-                user_policy_days INTEGER DEFAULT 1,
-                admin_expiry_date TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                org_id SERIAL PRIMARY KEY,
+                org_name VARCHAR(100) NOT NULL,
+                org_type BOOLEAN NOT NULL, -- (true=ภายใน, false=ภายนอก)
+                is_active BOOLEAN DEFAULT true,
+                admin_user VARCHAR(50) UNIQUE NOT NULL,
+                admin_pass CHAR(60) NOT NULL,
+                user_policy_days SMALLINT DEFAULT 1,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
-        // 2. สร้างตารางเก็บ User Wi-Fi (เก็บ 90 วัน)
+        // 2. ตารางระยะเวลาของแอดมินองค์กรภายนอก
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS org_access_periods (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE CASCADE,
+                access_start DATE NOT NULL,
+                access_end DATE NOT NULL,
+                note TEXT
+            );
+        `);
+
+        // 3. ตารางลงทะเบียนตู้ Kiosk
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS kiosk_machines (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE SET NULL,
+                machine_id VARCHAR(20) UNIQUE NOT NULL,
+                address VARCHAR(100),
+                is_active BOOLEAN DEFAULT true
+            );
+        `);
+
+        // 4. ตารางผู้ใช้งาน (ลบชื่อ-นามสกุลออก เหลือแค่ข้อมูลยืนยันตัวตน)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS wifi_users (
                 id SERIAL PRIMARY KEY,
-                org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
-                username VARCHAR(50) NOT NULL,
-                password VARCHAR(50) NOT NULL,
-                fname_th VARCHAR(100),
-                lname_th VARCHAR(100),
-                fname_en VARCHAR(100),
-                lname_en VARCHAR(100),
-                id_card VARCHAR(13),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE SET NULL,
+                card_id CHAR(13) NOT NULL,
+                username CHAR(14) UNIQUE NOT NULL
             );
         `);
 
-        // 3. สร้างตารางสถิติ (เก็บ 1 ปี)
+        // 5. ตารางเก็บรหัสผ่านและเวลาหมดอายุ (ตามที่คุณต้องการ)
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS admin_stats (
+            CREATE TABLE IF NOT EXISTS wifi_credentials (
                 id SERIAL PRIMARY KEY,
-                org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
-                issue_date DATE DEFAULT CURRENT_DATE,
-                total_issued INTEGER DEFAULT 0,
-                UNIQUE(org_id, issue_date)
+                user_id INTEGER REFERENCES wifi_users(id) ON DELETE CASCADE,
+                password CHAR(8) NOT NULL,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expire_time TIMESTAMP NOT NULL,
+                is_active BOOLEAN DEFAULT true
             );
         `);
 
-        console.log("✅ PostgreSQL Database & Tables Initialized");
+        // 6. ตารางสถิติ (เปลี่ยนชื่อฟิลด์ตาม ER Diagram)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_stat (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE CASCADE,
+                date DATE DEFAULT CURRENT_DATE,
+                count INTEGER DEFAULT 0,
+                UNIQUE(org_id, date)
+            );
+        `);
+
+        console.log("✅ อัปเกรด PostgreSQL Database Schema ใหม่สำเร็จ");
     } catch (err) {
         console.error("❌ Database Init Error:", err);
     }
