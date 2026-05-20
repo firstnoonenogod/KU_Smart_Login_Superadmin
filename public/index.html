@@ -7,72 +7,165 @@
     <link href="https://fonts.googleapis.com/css2?family=Krub:wght@400;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <nav class="navbar navbar-dark ku-navbar mb-4 shadow-sm">
+    <nav class="navbar navbar-expand-lg navbar-dark ku-navbar mb-4 shadow-sm">
         <div class="container-fluid px-4">
             <span class="navbar-brand mb-0 h1 d-flex align-items-center">
                 <img src="images/KU_SubLogo_Thai.png" alt="KU Logo" class="me-3 ku-logo-circle" height="40" onerror="this.style.display='none'">
-                <span class="fw-bold">KU Wi-Fi SmartLogin : Super Admin</span>
+                <span class="fw-bold d-none d-lg-inline">KU Wi-Fi SmartLogin : Super Admin</span>
             </span>
-            <div class="d-flex align-items-center">
+
+            <ul class="nav nav-pills" id="mainTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active rounded-pill text-white border-0 me-2" id="global-tab" data-bs-toggle="tab" data-bs-target="#global-panel" type="button" role="tab">🌐 ภาพรวมระบบ</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link rounded-pill text-white border-0" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics-panel" type="button" role="tab" onclick="initAnalyticsPage()">📊 วิเคราะห์รายองค์กร</button>
+                </li>
+            </ul>
+
+            <div class="d-flex align-items-center ms-auto">
                 <span class="text-white-50 me-3 d-none d-sm-inline">Welcome, Super Admin</span>
                 <button id="logoutBtn" class="btn btn-outline-light btn-sm rounded-pill px-3 shadow-sm">ออกจากระบบ</button>
             </div>
         </div>
     </nav>
 
-    <div class="container">
-        <div class="row mb-4">
-            <div class="col-md-4">
-                <div class="card ku-card-primary mb-3 shadow-sm border-0">
-                    <div class="card-body">
-                        <h6 class="card-title text-uppercase opacity-75">องค์กรทั้งหมด (Orgs)</h6>
-                        <h1 id="stat-orgs" class="display-5 fw-bold">0</h1>
+    <div class="container tab-content" id="mainTabsContent">
+        
+        <div class="tab-pane fade show active" id="global-panel" role="tabpanel" aria-labelledby="global-tab">
+            <div class="row mb-4 align-items-stretch">
+                <div class="col-md-4 d-flex flex-column justify-content-between">
+                    <div class="card ku-card-primary mb-3 shadow-sm border-0 w-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-uppercase opacity-75 fw-semibold text-muted">องค์กรทั้งหมด (Orgs)</h6>
+                            <h1 id="stat-orgs" class="display-5 fw-bold ku-text-green">0</h1>
+                        </div>
+                    </div>
+                    <div class="card ku-card-secondary mb-3 shadow-sm border-0 w-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-uppercase opacity-75 fw-semibold text-muted">ผู้ใช้งาน Wi-Fi รวม (Unique)</h6>
+                            <h1 id="stat-users" class="display-5 fw-bold text-secondary">0</h1>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-8 mb-3">
+                    <div class="card shadow-sm border-0 p-3 h-100 bg-white">
+                        <h6 class="fw-bold text-muted mb-2">📊 แผนภูมิเปรียบเทียบยอดการออกรหัส Wi-Fi รายองค์กร</h6>
+                        <div style="position: relative; flex-grow: 1; min-height: 160px;">
+                            <canvas id="globalBarChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card ku-card-secondary mb-3 shadow-sm border-0">
-                    <div class="card-body">
-                        <h6 class="card-title text-uppercase opacity-75">ผู้ใช้งาน Wi-Fi รวม</h6>
-                        <h1 id="stat-users" class="display-5 fw-bold">0</h1>
-                    </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center py-3 border-bottom">
+                    <h5 class="mb-0 fw-bold ku-text-green">จัดการองค์กร (Organizations)</h5>
+                    <button class="btn btn-ku px-4 rounded-pill shadow-sm" data-bs-toggle="modal" data-bs-target="#addOrgModal">
+                        + เพิ่มองค์กร
+                    </button>
                 </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card ku-card-outline mb-3 shadow-sm border-0">
-                    <div class="card-body">
-                        <h6 class="card-title text-uppercase text-muted">Policy มาตรฐาน</h6>
-                        <h1 id="stat-policy" class="display-5 fw-bold ku-text-green">1 วัน</h1>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="px-4">ชื่อองค์กร</th>
+                                    <th>Admin Username</th>
+                                    <th>สิทธิ์ User (วัน)</th>
+                                    <th>วันหมดอายุ Admin</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="org-table-body"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center py-3 border-bottom">
-                <h5 class="mb-0 fw-bold ku-text-green">จัดการองค์กร (Organizations)</h5>
-                <button class="btn btn-ku px-4 rounded-pill shadow-sm" data-bs-toggle="modal" data-bs-target="#addOrgModal">
-                    + เพิ่มองค์กร
-                </button>
+        <div class="tab-pane fade" id="analytics-panel" role="tabpanel" aria-labelledby="analytics-tab">
+            <div class="card shadow-sm border-0 p-4 mb-4 bg-white rounded-3">
+                <div class="row align-items-center">
+                    <div class="col-md-5">
+                        <h5 class="fw-bold ku-text-green mb-0">🔍 คัดกรองและเจาะลึกข้อมูลรายผู้ดูแลระบบ</h5>
+                    </div>
+                    <div class="col-md-7 mt-2 mt-md-0">
+                        <select id="orgSelector" class="form-select form-select-lg bg-light border-0 shadow-sm" onchange="loadSelectedOrgAnalytics()">
+                            <option value="all">ดูภาพรวมทุกองค์กรทั้งหมด</option>
+                        </select>
+                    </div>
+                </div>
             </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th class="px-4">ชื่อองค์กร</th>
-                                <th>Admin Username</th>
-                                <th>สิทธิ์ User (วัน)</th>
-                                <th>วันหมดอายุ Admin</th>
-                                <th class="text-center">จัดการ</th>
-                            </tr>
-                        </thead>
-                        <tbody id="org-table-body">
+
+            <div class="row mb-4">
+                <div class="col-lg-4 mb-3">
+                    <div class="card shadow-sm border-0 p-3 text-center h-100 bg-white">
+                        <h6 class="fw-bold text-muted mb-3">🟢 สัดส่วนสถานะสิทธิ์เข้าใช้งาน Wi-Fi ปัจจุบัน</h6>
+                        <div style="position: relative; height: 180px; margin: 0 auto; width: 100%;">
+                            <canvas id="orgDoughnutChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-8 mb-3">
+                    <div class="card shadow-sm border-0 p-4 h-100 bg-white d-flex flex-column justify-content-center">
+                        <h6 class="fw-bold text-muted mb-4 text-center text-md-start">📈 สรุปยอดการออกรหัสผ่านแยกตามช่วงเวลา</h6>
+                        <div class="row text-center g-3">
+                            <div class="col-3 border-end">
+                                <small class="text-muted fw-semibold">วันนี้</small>
+                                <h2 id="ana-today" class="fw-bold text-primary mt-2">0</h2>
+                            </div>
+                            <div class="col-3 border-end">
+                                <small class="text-muted fw-semibold">สัปดาห์นี้</small>
+                                <h2 id="ana-week" class="fw-bold text-success mt-2">0</h2>
+                            </div>
+                            <div class="col-3 border-end">
+                                <small class="text-muted fw-semibold">เดือนนี้</small>
+                                <h2 id="ana-month" class="fw-bold text-warning mt-2">0</h2>
+                            </div>
+                            <div class="col-3">
+                                <small class="text-muted fw-semibold">3 เดือน</small>
+                                <h2 id="ana-3month" class="fw-bold text-danger mt-2">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center py-3 border-bottom gap-2">
+                    <h5 class="mb-0 fw-bold ku-text-green">📂 ประวัติรายชื่อผู้ลงทะเบียนขอรับรหัส Wi-Fi (ย้อนหลัง 90 วัน)</h5>
+                    
+                    <div class="btn-group shadow-sm rounded-pill p-1 bg-light border" role="group">
+                        <button type="button" class="btn btn-sm btn-outline-secondary active rounded-pill px-3" id="filter-all" onclick="filterUserTimeframe('all')">ทั้งหมด</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="filter-today" onclick="filterUserTimeframe('today')">วันนี้</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="filter-week" onclick="filterUserTimeframe('week')">สัปดาห์นี้</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="filter-month" onclick="filterUserTimeframe('month')">เดือนนี้</button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="px-4">ชื่อ-นามสกุล</th>
+                                    <th>เลขบัตรประชาชน</th>
+                                    <th>รหัส Wi-Fi (User)</th>
+                                    <th>องค์กรผู้ออกบัตร</th>
+                                    <th>เวลาที่ออกรหัส</th>
+                                    <th class="text-center">สถานะใช้งาน</th>
+                                }
+                            </thead>
+                            <tbody id="analytics-table-body">
+                                <tr><td colspan="6" class="text-center text-muted py-4">กรุณาเลือกแอดมินเพื่อเรียกดูประวัติข้อมูล</td></tr>
                             </tbody>
-                    </table>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -91,7 +184,6 @@
                             <label class="form-label fw-semibold">ชื่อองค์กร / หน่วยงาน</label>
                             <input type="text" id="orgName" class="form-control form-control-lg bg-light" placeholder="เช่น คณะวิทยาศาสตร์" required>
                         </div>
-
                         <div class="mb-3 border p-3 rounded bg-light">
                             <label class="form-label fw-semibold d-block text-dark">ประเภทขององค์กร</label>
                             <div class="form-check form-check-inline">
@@ -103,17 +195,14 @@
                                 <label class="form-check-label text-warning fw-bold" for="typeExternal" style="color: #d39e00 !important;">หน่วยงานภายนอก (ชั่วคราว)</label>
                             </div>
                         </div>
-
                         <div class="mb-3" id="adminValidityDiv" style="display: none;">
                             <label class="form-label fw-semibold" style="color: #d39e00;">อายุการใช้งานของ Admin องค์กรภายนอก (วัน)</label>
                             <input type="number" id="adminValidity" class="form-control form-control-lg bg-light border-warning" min="1" placeholder="เช่น 7">
                         </div>
-
                         <div class="mb-4">
                             <label class="form-label fw-semibold text-success">สิทธิ์ที่ปล่อยให้ User ใช้งาน Wi-Fi (คนละกี่วัน)</label>
                             <input type="number" id="userPolicy" class="form-control form-control-lg bg-light border-success" value="1" min="1" required>
                         </div>
-
                         <button type="submit" class="btn btn-ku btn-lg w-100 rounded-pill shadow-sm">บันทึกและ Generate รหัส Admin</button>
                     </form>
                 </div>
@@ -151,73 +240,6 @@
         </div>
     </div>
 
-    <div class="modal fade" id="viewModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg">
-                <div class="modal-header bg-primary text-white border-0">
-                    <h5 class="modal-title fw-bold">📊 ข้อมูล Dashboard</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body p-5 text-center bg-white">
-                    <div class="mb-3">
-                        <div class="modal-body p-4 bg-light">
-                            <div class="row text-center mb-3">
-                                <div class="col-6 col-md-3 mb-2">
-                                    <div class="card shadow-sm border-0"><div class="card-body p-2"><small class="text-muted">วันนี้</small><h4 id="dash-today" class="mb-0 ku-text-green">0</h4></div></div>
-                                </div>
-                                <div class="col-6 col-md-3 mb-2">
-                                    <div class="card shadow-sm border-0"><div class="card-body p-2"><small class="text-muted">สัปดาห์นี้</small><h4 id="dash-week" class="mb-0 ku-text-green">0</h4></div></div>
-                                </div>
-                                <div class="col-6 col-md-3 mb-2">
-                                    <div class="card shadow-sm border-0"><div class="card-body p-2"><small class="text-muted">เดือนนี้</small><h4 id="dash-month" class="mb-0 ku-text-green">0</h4></div></div>
-                                </div>
-                                <div class="col-6 col-md-3 mb-2">
-                                    <div class="card shadow-sm border-0"><div class="card-body p-2"><small class="text-muted">3 เดือน</small><h4 id="dash-3month" class="mb-0 ku-text-green">0</h4></div></div>
-                                </div>
-                            </div>
-                            
-                            <div class="row text-center mb-3">
-                                <div class="col-6">
-                                    <div class="alert alert-success py-2 mb-0 border-0 shadow-sm">
-                                        <strong>🟢 ใช้งานอยู่ (Active):</strong> <span id="dash-active" class="fs-5">0</span>
-                                    </div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="alert alert-secondary py-2 mb-0 border-0 shadow-sm">
-                                        <strong>⚪ หมดอายุ (Inactive):</strong> <span id="dash-inactive" class="fs-5">0</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <h6 class="fw-bold mt-4 mb-2 ku-text-green">ประวัติผู้เข้าใช้งาน Wi-Fi</h6>
-                            <div class="table-responsive bg-white rounded shadow-sm border" style="max-height: 250px; overflow-y: auto;">
-                                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
-                                    <thead class="table-light position-sticky top-0 shadow-sm">
-                                        <tr>
-                                            <th>ชื่อ-นามสกุล</th>
-                                            <th>เลขบัตรประชาชน</th>
-                                            <th>Username</th>
-                                            <th>เวลาที่รับบัตร</th>
-                                            <th>สถานะ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="dash-history-body">
-                                        <tr><td colspan="5" class="text-center text-muted py-3">กำลังโหลดข้อมูล...</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <h5 class="fw-bold">กำลังอยู่ในช่วงพัฒนา</h5>
-                    <p class="text-muted mb-0">ระบบเตรียมพร้อมสำหรับดึงข้อมูลขององค์กร ID: <span id="viewModalOrgId" class="fw-bold text-primary fs-5"></span> มาแสดงผลที่นี่ในอนาคต</p>
-                </div>
-                <div class="modal-footer border-0 justify-content-center bg-light">
-                    <button type="button" class="btn btn-secondary px-4 rounded-pill" data-bs-dismiss="modal">ปิดหน้าต่าง</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div class="modal fade" id="deleteModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow-lg">
@@ -230,7 +252,7 @@
                     <p class="text-muted mb-1">ที่จะลบข้อมูลขององค์กร:</p>
                     <p id="deleteModalOrgName" class="fs-5 fw-bold text-danger mb-4"></p>
                     <div class="alert alert-danger py-2 mb-0 border-0" role="alert">
-                        <small>ข้อมูลนี้จะถูกลบออกจากฐานข้อมูลทันทีและ <b>ไม่สามารถกู้คืนได้</b></small>
+                        <small>ชื่อผู้ดูแลระบบนี้จะถูกลบออกทันที แต่ประวัติรายชื่อผู้ใช้งาน Wi-Fi จะยังคงบันทึกเก็บไว้เพื่อความปลอดภัย</small>
                     </div>
                 </div>
                 <div class="modal-footer border-0 justify-content-center bg-light">
@@ -243,14 +265,5 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="script.js"></script>
-    
-    <script>
-        document.getElementById('logoutBtn').addEventListener('click', () => {
-            if (confirm('คุณต้องการออกจากระบบใช่หรือไม่?')) {
-                sessionStorage.removeItem('isSuperAdmin');
-                window.location.href = 'login.html';
-            }
-        });
-    </script>
 </body>
 </html>

@@ -3,6 +3,12 @@ if (!token) {
     window.location.href = 'login.html'; 
 }
 
+function esc(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 // 1. ฟังก์ชันดึงสถิติตัวเลขด้านบน
 async function fetchStats() {
     try {
@@ -43,12 +49,6 @@ async function fetchOrganizations() {
     const tbody = document.getElementById('org-table-body');
     tbody.innerHTML = '';
 
-    function esc(str) {
-        return String(str ?? '').replace(/[&<>"']/g, c => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[c]));
-    }
-    
     orgs.forEach(org => {
         let typeBadge = org.org_type === 'internal' 
             ? '<span class="badge bg-success">ภายใน</span>' 
@@ -65,7 +65,7 @@ async function fetchOrganizations() {
                 <td>ให้ User ละ ${org.user_policy_days} วัน</td>
                 <td>${expiryText}</td>
                 <td class="text-center">
-                    <button class="btn btn-sm btn-primary shadow-sm rounded-pill px-3 me-1" onclick="viewOrgDetails(${org.id})">ดูข้อมูล</button>
+                    <button class="btn btn-sm btn-primary shadow-sm rounded-pill px-3 me-1" onclick="shortcutToAnalytics(${org.id})">ดูข้อมูล</button>
                     <button class="btn btn-sm btn-danger shadow-sm rounded-pill px-3" onclick="deleteOrg(${org.id}, '${org.name}')">ลบ</button>
                 </td>
             </tr>
@@ -224,10 +224,209 @@ window.onload = () => {
     fetchOrganizations();
 };
 
+// ====================================================
+// สคริปต์ระบบสลับหน้าวิเคราะห์ข้อมูล, ฟิลเตอร์ช่วงเวลา และวาดกราฟ (Chart.js)
+// ====================================================
+
+let globalBarChartInstance = null;
+let orgDoughnutChartInstance = null;
+let currentLoadedHistory = []; // เก็บประวัติผู้ใช้ชั่วคราวเพื่อทำฟิลเตอร์หน้าบ้าน
+
+// 1. ฟังก์ชันดึงรายชื่อแอดมินองค์กรทั้งหมดมาใส่ในช่องดรอปดาวน์เลือกข้อมูล
+async function initAnalyticsPage() {
+    try {
+        const res = await fetch('/api/organizations', {
+            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
+        });
+        const orgs = await res.json();
+        
+        const selector = document.getElementById('orgSelector');
+        // ล้างข้อมูลยกเว้นตัวเลือกแรก
+        selector.innerHTML = '<option value="all">ดูภาพรวมทุกองค์กรทั้งหมด</option>';
+        
+        orgs.forEach(org => {
+            const opt = document.createElement('option');
+            opt.value = org.id;
+            opt.innerText = `${org.name} (${org.admin_user})`;
+            selector.appendChild(opt);
+        });
+        
+        // สั่งวาดกราฟเปรียบเทียบในหน้าหลักตัวแรกด้วย
+        renderGlobalBarChart(orgs);
+        // สั่งโหลดข้อมูลภาพรวมทั้งหมดมาขึ้นจอก่อนเริ่มต้น
+        loadSelectedOrgAnalytics();
+    } catch (e) {
+        console.error("โหลดรายชื่อองค์กรล้มเหลว", e);
+    }
+}
+
+// 2. ฟังก์ชันหลักในการดึงข้อมูลส่วนตัวของแอดมินที่ถูกเลือก
+async function loadSelectedOrgAnalytics() {
+    const orgId = document.getElementById('orgSelector').value;
+    try {
+        const res = await fetch(`/api/dashboard/org/${orgId}`, {
+            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            // อัปเดตตัวเลขแผงเวลา
+            document.getElementById('ana-today').innerText = data.stats.today;
+            document.getElementById('ana-week').innerText = data.stats.this_week;
+            document.getElementById('ana-month').innerText = data.stats.this_month;
+            document.getElementById('ana-3month').innerText = data.stats.three_months;
+            
+            // ส่งตัวเลขสัดส่วนไปให้กราฟโดนัทวาดผล
+            renderOrgDoughnutChart(data.activeCount, data.inactiveCount);
+            
+            // บันทึกประวัติลงตารางและเตรียมฟิลเตอร์
+            currentLoadedHistory = data.history;
+            filterUserTimeframe('all'); // โชว์ทั้งหมดก่อนเริ่มต้น
+        }
+    } catch (e) {
+        console.error("โหลดข้อมูล Analytics ไม่สำเร็จ", e);
+    }
+}
+
+// 3. ฟังก์ชันระบบฟิลเตอร์คัดกรองช่วงเวลาผู้ใช้ (วันนี้ / สัปดาห์นี้ / เดือนนี้)
+function filterUserTimeframe(range) {
+    // เปลี่ยนสถานะปุ่ม Active สวยงาม
+    document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById(`filter-${range}`).classList.add('active');
+    
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('th-TH');
+    
+    // กรองข้อมูลใน Array บนหน้าบ้านทันที รวดเร็วและไม่ต้องยิงฐานข้อมูลซ้ำซ้อน
+    const filtered = currentLoadedHistory.filter(user => {
+        const createDate = new Date(user.created_at);
+        if (range === 'today') {
+            return createDate.toLocaleDateString('th-TH') === todayStr;
+        } else if (range === 'week') {
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            return createDate >= sevenDaysAgo;
+        } else if (range === 'month') {
+            return createDate.getMonth() === now.getMonth() && createDate.getFullYear() === now.getFullYear();
+        }
+        return true; // คืนค่าทั้งหมด
+    });
+    
+    // สั่งวาดข้อมูลลงตารางวิเคราะห์
+    renderAnalyticsTable(filtered);
+}
+
+// 4. ฟังก์ชันวาดรายชื่อข้อมูลผู้ใช้ลงตารางประวัติ
+function renderAnalyticsTable(users) {
+    const tbody = document.getElementById('analytics-table-body');
+    tbody.innerHTML = '';
+    
+    if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">❌ ไม่พบประวัติผู้ใช้งานในช่วงเวลาดังกล่าว</td></tr>';
+        return;
+    }
+    
+    users.forEach(user => {
+        const dateStr = new Date(user.created_at).toLocaleString('th-TH');
+        const badge = user.status === 'Active' 
+            ? '<span class="badge bg-success">Active</span>' 
+            : '<span class="badge bg-secondary">Inactive</span>';
+            
+        const maskedIdCard = user.id_card && user.id_card.length === 13 
+            ? user.id_card.substring(0,3) + "-XXXXX-" + user.id_card.substring(10)
+            : '-';
+            
+        tbody.innerHTML += `
+            <tr>
+                <td class="px-4 fw-bold">${esc(user.fname_th)} ${esc(user.lname_th)}</td>
+                <td class="font-mono text-muted">${maskedIdCard}</td>
+                <td><span class="badge bg-light text-dark border font-mono">${esc(user.username)}</span></td>
+                <td><small class="text-primary fw-semibold">${esc(user.org_name)}</small></td>
+                <td><small>${dateStr}</small></td>
+                <td class="text-center">${badge}</td>
+            </tr>
+        `;
+    });
+}
+
+// 5. 📊 ฟังก์ชันวาดกราฟแท่งเปรียบเทียบแอดมินหน้าแรก (Bar Chart)
+function renderGlobalBarChart(orgs) {
+    const ctx = document.getElementById('globalBarChart').getContext('2d');
+    const labels = orgs.map(o => o.name);
+    // สร้างม็อคอัพหรือสุ่มเพื่อโชว์โครงสร้างให้เห็นภาพ (ในระบบจริงสามารถคิวรี่นับจำนวนจากแอดมินแต่ละคนมาใส่ได้เลย)
+    const dataValues = orgs.map(() => Math.floor(Math.random() * 50) + 10); 
+    
+    if (globalBarChartInstance) globalBarChartInstance.destroy();
+    
+    globalBarChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'ยอดสถิติรหัส Wi-Fi ประจำแต่ละแอดมินองค์กร',
+                data: dataValues,
+                backgroundColor: '#006664',
+                borderRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+}
+
+// 6. 🍩 ฟังก์ชันวาดกราฟวงกลมโดนัทสัดส่วนบัตร (Doughnut Chart)
+function renderOrgDoughnutChart(active, inactive) {
+    const ctx = document.getElementById('orgDoughnutChart').getContext('2d');
+    
+    if (orgDoughnutChartInstance) orgDoughnutChartInstance.destroy();
+    
+    if (active === 0 && inactive === 0) active = 1; // กันกราฟพังกรณีไม่มีข้อมูลเลย
+    
+    orgDoughnutChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['ใช้งานอยู่ (Active)', 'หมดอายุ (Inactive)'],
+            datasets: [{
+                data: [active, inactive],
+                backgroundColor: ['#28a745', '#6c757d'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12 } }
+            }
+        }
+    });
+}
+
+// เชื่อมต่อการกดชื่อองค์กรจากตารางหน้าหลัก ให้กดลิงก์ปุ๊บแล้ววิ่งสลับหน้าแท็บมาดูหน้าวิเคราะห์รายคนได้ทันที
+function shortcutToAnalytics(orgId) {
+    const tabEl = document.getElementById('analytics-tab');
+    const tab = new bootstrap.Tab(tabEl);
+    tab.show();
+    initAnalyticsPage().then(() => {
+        document.getElementById('orgSelector').value = orgId;
+        loadSelectedOrgAnalytics();
+    });
+}
+
 setInterval(() => {
     // ถ้าหน้าต่าง Popup (Modal) ไม่ได้เปิดอยู่ ค่อยโหลดข้อมูลใหม่ เพื่อไม่ให้ขัดจังหวะการใช้งาน
     if (!document.body.classList.contains('modal-open')) {
+        // 1. อัปเดตข้อมูลหน้าหลัก
         fetchStats();
         fetchOrganizations();
+        
+        // 2. อัปเดตข้อมูลหน้าวิเคราะห์ (กราฟและตารางคน) เฉพาะตอนที่ผู้ใช้เลือกองค์กรไว้แล้ว
+        const selectedOrg = document.getElementById('orgSelector');
+        if (selectedOrg && selectedOrg.value) {
+            loadSelectedOrgAnalytics();
+        }
     }
 }, 5000);

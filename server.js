@@ -60,7 +60,9 @@ app.post('/api/superadmin/login', async (req, res) => {
 app.get('/api/dashboard/stats', requireSuperAdmin, async (req, res) => {
     try {
         const orgCount = await pool.query('SELECT COUNT(*) FROM organizations');
-        const userCount = await pool.query('SELECT COUNT(*) FROM wifi_users');
+        // ใช้ DISTINCT id_card เพื่อไม่ให้คนที่มีบัตรประชาชนเดียวกันถูกนับซ้ำในยอดรวมระบบ
+        const userCount = await pool.query('SELECT COUNT(DISTINCT id_card) FROM wifi_users');
+        
         res.json({ 
             total_orgs: parseInt(orgCount.rows[0].count), 
             total_wifi_users: parseInt(userCount.rows[0].count) 
@@ -121,14 +123,71 @@ app.post('/api/organizations', requireSuperAdmin, async (req, res) => {
 });
 
 // ลบองค์กร
-app.delete('/api/organizations/:id', requireSuperAdmin, async (req, res) => {
-    const { id } = req.params;
+app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
+    const orgId = req.params.id;
     try {
-        await pool.query('DELETE FROM organizations WHERE id = $1', [id]);
-        res.json({ success: true, message: "ลบองค์กรสำเร็จ" });
+        let policyDays = 1;
+        
+        if (orgId !== 'all') {
+            const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE id = $1', [orgId]);
+            if (orgRes.rows.length > 0) {
+                policyDays = orgRes.rows[0].user_policy_days;
+            }
+        }
+
+        // ค้นหาตาม Org ID ปกติ หรือค้นหาทั้งหมดถ้าส่งค่า 'all' มา
+        const whereClause = orgId === 'all' ? '' : `WHERE org_id = ${parseInt(orgId)}`;
+        const statsWhereClause = orgId === 'all' ? '' : `WHERE org_id = ${parseInt(orgId)}`;
+
+        // ดึงสถิติแยกตามช่วงเวลา
+        const statsQuery = await pool.query(`
+            SELECT 
+                COALESCE(SUM(CASE WHEN issue_date = CURRENT_DATE THEN total_issued ELSE 0 END), 0) as today,
+                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '7 days' THEN total_issued ELSE 0 END), 0) as this_week,
+                COALESCE(SUM(CASE WHEN issue_date >= date_trunc('month', CURRENT_DATE) THEN total_issued ELSE 0 END), 0) as this_month,
+                COALESCE(SUM(CASE WHEN issue_date >= CURRENT_DATE - INTERVAL '3 months' THEN total_issued ELSE 0 END), 0) as three_months
+            FROM admin_stats 
+            ${statsWhereClause}
+        `);
+
+        // ดึงประวัติผู้ใช้งาน (ดึงชื่อองค์กรพ่วงมาโชว์ด้วย เผื่อกรณีองค์กรถูกลบจะขึ้นว่า "องค์กรที่ถูกลบ")
+        const historyQuery = await pool.query(`
+            SELECT u.fname_th, u.lname_th, u.id_card, u.username, u.created_at, COALESCE(o.name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
+            FROM wifi_users u
+            LEFT JOIN organizations o ON u.org_id = o.id
+            ${whereClause}
+            ORDER BY u.created_at DESC
+        `);
+
+        let activeCount = 0;
+        let inactiveCount = 0;
+        const now = new Date();
+        
+        const historyList = historyQuery.rows.map(user => {
+            const createdDate = new Date(user.created_at);
+            const expireDate = new Date(createdDate.getTime() + (policyDays * 24 * 60 * 60 * 1000));
+            
+            let status = 'Inactive';
+            if (now <= expireDate) {
+                status = 'Active';
+                activeCount++;
+            } else {
+                inactiveCount++;
+            }
+
+            return { ...user, status };
+        });
+
+        res.json({
+            success: true,
+            stats: statsQuery.rows[0],
+            activeCount,
+            inactiveCount,
+            history: historyList
+        });
     } catch (err) {
-        console.error("Delete Error:", err);
-        res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดในการลบ" });
+        console.error("Dashboard Error:", err);
+        res.status(500).json({ error: "Database error" });
     }
 });
 
