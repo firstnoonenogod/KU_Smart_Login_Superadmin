@@ -2,6 +2,7 @@ let lastActiveCount = null;
 let lastInactiveCount = null;
 let lastHistoryJSON = "";
 
+const currentOrgId = sessionStorage.getItem('org_id'); // ดึง ID องค์กรตอนแอดมินล็อกอิน
 const token = sessionStorage.getItem('superAdminToken');
 if (!token) {
     window.location.href = 'login.html'; 
@@ -451,6 +452,36 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
         window.location.href = 'login.html';
     }
 });
+
+async function loadEmployees() {
+    if (!currentOrgId) return;
+    const res = await fetch(`http://158.108.217.46:3000/api/admin/employees?org_id=${currentOrgId}`);
+    const result = await res.json();
+    const tbody = document.getElementById('employee-table-body');
+    tbody.innerHTML = '';
+    result.data.forEach(emp => {
+        tbody.innerHTML += `<tr><td class="fw-bold text-primary">${emp.ku_email}</td><td>${emp.emp_policy_days} วัน</td><td class="text-center"><button class="btn btn-sm btn-danger px-3" onclick="deleteEmployee(${emp.id})">ลบสิทธิ์</button></td></tr>`;
+    });
+}
+
+document.getElementById('add-employee-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const res = await fetch('http://158.108.217.46:3000/api/admin/employees', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_id: currentOrgId, ku_email: document.getElementById('empEmail').value, emp_policy_days: document.getElementById('empDays').value })
+    });
+    const result = await res.json();
+    if (result.success) { document.getElementById('empEmail').value = ''; loadEmployees(); }
+    else alert(result.message);
+});
+
+async function deleteEmployee(empId) {
+    if(!confirm('ลบสิทธิ์พนักงานคนนี้?')) return;
+    await fetch(`http://158.108.217.46:3000/api/admin/employees/${empId}`, { method: 'DELETE' });
+    loadEmployees();
+}
+
+if(document.getElementById('employee-table-body')) loadEmployees();
 
 setInterval(() => {
     // ถ้าหน้าต่าง Popup (Modal) ไม่ได้เปิดอยู่ ค่อยโหลดข้อมูลใหม่ เพื่อไม่ให้ขัดจังหวะการใช้งาน

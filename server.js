@@ -9,6 +9,8 @@ const { pool, initDb } = require('./database');
 const app = express();
 const PORT = 3000;
 const SUPER_HASH = process.env.SUPERADMIN_PASS;
+const adminData = JSON.parse(sessionStorage.getItem('adminData') || '{}');
+const currentOrgId = adminData.org_id;
 
 app.use(cors({
     origin: ['http://158.108.217.46:8000', 'http://localhost:8000', 'http://158.108.217.46:3000', 'http://localhost:3000']
@@ -186,6 +188,74 @@ app.post('/api/admin/login', async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ success: false, message: "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์" });
+    }
+});
+
+// --- 1. API ดึงรายชื่อพนักงาน ---
+app.get('/api/admin/employees', async (req, res) => {
+    const org_id = req.query.org_id; 
+    try {
+        const result = await pool.query('SELECT * FROM org_employees WHERE org_id = $1 ORDER BY id DESC', [org_id]);
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- 2. API เพิ่มพนักงาน ---
+app.post('/api/admin/employees', async (req, res) => {
+    const { org_id, ku_email, emp_policy_days } = req.body;
+    try {
+        const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
+        if (emp_policy_days > orgRes.rows[0].user_policy_days) {
+            return res.status(400).json({ success: false, message: "สิทธิ์จำนวนวัน ต้องไม่เกินสิทธิ์ขององค์กร" });
+        }
+        await pool.query(`INSERT INTO org_employees (org_id, ku_email, emp_policy_days) VALUES ($1, $2, $3)`, [org_id, ku_email, emp_policy_days]);
+        res.json({ success: true, message: "เพิ่มสิทธิ์พนักงานสำเร็จ" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- 3. API ลบพนักงาน ---
+app.delete('/api/admin/employees/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM org_employees WHERE id = $1', [req.params.id]);
+        res.json({ success: true, message: "ลบสิทธิ์พนักงานสำเร็จ" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- 4. API ส่งไปหน้าล็อกอิน KU ---
+app.get('/api/auth/ku-login', (req, res) => {
+    const authUrl = `https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/auth?client_id=${process.env.KU_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.KU_REDIRECT_URI)}&response_type=code&scope=basic openid`;
+    res.redirect(authUrl);
+});
+
+// --- 5. API รับค่ากลับมาจาก KU (Callback) ---
+app.get('/api/auth/ku-callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.status(400).send("Authorization Code missing");
+
+    try {
+        const tokenResponse = await axios.post('https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/token', 
+            new URLSearchParams({ grant_type: 'authorization_code', code: code, client_id: process.env.KU_CLIENT_ID, client_secret: process.env.KU_CLIENT_SECRET, redirect_uri: process.env.KU_REDIRECT_URI }).toString(), 
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        const userInfo = await axios.get('https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/userinfo', { headers: { 'Authorization': `Bearer ${tokenResponse.data.access_token}` } });
+        const userEmail = userInfo.data.email || userInfo.data.mail; 
+        const empCheck = await pool.query(`SELECT e.*, o.org_name FROM org_employees e JOIN organizations o ON e.org_id = o.org_id WHERE e.ku_email = $1 AND e.is_active = true`, [userEmail]);
+
+        if (empCheck.rows.length === 0) return res.status(403).send("คุณไม่ได้รับสิทธิ์ในการใช้งานระบบ Kiosk นี้");
+
+        const employeeData = empCheck.rows[0];
+        const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '8h' });
+
+        // กลับไปหน้าตู้ Kiosk พอร์ต 8000
+        res.redirect(`http://158.108.217.46:8000/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
+    } catch (err) {
+        res.status(500).send("SSO Error: ไม่สามารถเข้าสู่ระบบได้");
     }
 });
 

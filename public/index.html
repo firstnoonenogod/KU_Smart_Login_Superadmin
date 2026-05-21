@@ -169,6 +169,31 @@
         </div>
     </div>
 
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">👥 จัดการสิทธิ์พนักงานตู้ Kiosk (KU ALL-Login)</h5>
+        </div>
+        <div class="card-body">
+            <form id="add-employee-form" class="row g-3 mb-4 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label">อีเมลพนักงาน (@ku.ac.th)</label>
+                    <input type="email" class="form-control" id="empEmail" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">โควตาให้ User ได้ (วัน)</label>
+                    <input type="number" class="form-control" id="empDays" min="1" value="1" required>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-success w-100">➕ เพิ่มพนักงาน</button>
+                </div>
+            </form>
+            <table class="table table-hover align-middle">
+                <thead class="table-light"><tr><th>อีเมล</th><th>โควตา</th><th class="text-center">จัดการ</th></tr></thead>
+                <tbody id="employee-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="modal fade" id="addOrgModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow">
