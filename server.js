@@ -1,3 +1,4 @@
+const axios = require('axios');
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -327,6 +328,117 @@ app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
     } catch (err) {
         console.error("Dashboard Error:", err);
         res.status(500).json({ error: "Database error" });
+    }
+});
+
+// ดึงรายชื่อพนักงานในองค์กร
+app.get('/api/admin/employees', async (req, res) => {
+    // หมายเหตุ: ต้องทำ Middleware ตรวจสอบ JWT ของ Admin องค์กรก่อน (สมมติว่าเอา org_id มาจาก token)
+    const org_id = req.query.org_id; 
+    try {
+        const result = await pool.query('SELECT * FROM org_employees WHERE org_id = $1 ORDER BY id DESC', [org_id]);
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// เพิ่มพนักงานใหม่
+app.post('/api/admin/employees', async (req, res) => {
+    const { org_id, ku_email, emp_policy_days } = req.body;
+    try {
+        // เช็คก่อนว่าจำนวนวันที่ให้ ไม่เกินขององค์กร
+        const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
+        if (emp_policy_days > orgRes.rows[0].user_policy_days) {
+            return res.status(400).json({ success: false, message: "สิทธิ์จำนวนวัน ต้องไม่เกินสิทธิ์ขององค์กร" });
+        }
+
+        await pool.query(`
+            INSERT INTO org_employees (org_id, ku_email, emp_policy_days) 
+            VALUES ($1, $2, $3)
+        `, [org_id, ku_email, emp_policy_days]);
+        
+        res.json({ success: true, message: "เพิ่มสิทธิ์พนักงานสำเร็จ" });
+    } catch (err) {
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "อีเมลนี้มีอยู่ในระบบแล้ว" });
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ลบสิทธิ์พนักงาน
+app.delete('/api/admin/employees/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM org_employees WHERE id = $1', [req.params.id]);
+        res.json({ success: true, message: "ลบสิทธิ์พนักงานสำเร็จ" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+///////////////////////////////////////////////////////////////
+// KU All login
+// Step 1: Kiosk เรียก API นี้เพื่อ Redirect ไปหน้า KU Login
+app.get('/api/auth/ku-login', (req, res) => {
+    const authUrl = `https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/auth?client_id=${process.env.KU_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.KU_REDIRECT_URI)}&response_type=code&scope=basic openid`;
+    res.redirect(authUrl);
+});
+
+// Step 2: KU Redirect กลับมาพร้อมรหัส Code
+app.get('/api/auth/ku-callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.status(400).send("Authorization Code missing");
+
+    try {
+        // แลก Code เป็น Access Token
+        const tokenResponse = await axios.post('https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/token', 
+            new URLSearchParams({
+                grant_type: 'authorization_code',
+                code: code,
+                client_id: process.env.KU_CLIENT_ID,
+                client_secret: process.env.KU_CLIENT_SECRET,
+                redirect_uri: process.env.KU_REDIRECT_URI
+            }).toString(), 
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+
+        const accessToken = tokenResponse.data.access_token;
+
+        // ดึงข้อมูลผู้ใช้จาก Token
+        const userInfo = await axios.get('https://alllogin.ku.ac.th/realms/KU-Alllogin/protocol/openid-connect/userinfo', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        // สมมติว่าได้ข้อมูลอีเมลกลับมาเป็นฟิลด์ email หรือ mail
+        const userEmail = userInfo.data.email || userInfo.data.mail; 
+
+        // ตรวจสอบว่าอีเมลนี้มีสิทธิ์ในตาราง org_employees หรือไม่
+        const empCheck = await pool.query(`
+            SELECT e.*, o.org_name 
+            FROM org_employees e 
+            JOIN organizations o ON e.org_id = o.org_id 
+            WHERE e.ku_email = $1 AND e.is_active = true
+        `, [userEmail]);
+
+        if (empCheck.rows.length === 0) {
+            return res.status(403).send("คุณไม่ได้รับสิทธิ์ในการใช้งานระบบ Kiosk นี้");
+        }
+
+        const employeeData = empCheck.rows[0];
+
+        // สร้าง JWT Local Token ให้ตู้ Kiosk ไปใช้งานต่อ (พนักงาน)
+        const kioskToken = jwt.sign({ 
+            role: 'employee', 
+            org_id: employeeData.org_id, 
+            email: employeeData.ku_email,
+            policy_days: employeeData.emp_policy_days
+        }, process.env.JWT_SECRET, { expiresIn: '8h' });
+
+        // Redirect กลับไปหน้า Kiosk พร้อม Token (นำไปใช้งานหน้าเว็บต่อ)
+        res.redirect(`http://localhost:8000/kiosk.html?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
+
+    } catch (err) {
+        console.error("SSO Error:", err.response ? err.response.data : err.message);
+        res.status(500).send("เกิดข้อผิดพลาดในการยืนยันตัวตนกับ KU ALL-Login");
     }
 });
 
