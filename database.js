@@ -83,6 +83,25 @@ const initDb = async () => {
             );
         `);
 
+        // 7. ตารางเก็บรายชื่อพนักงาน (สำหรับ KU ALL-Login)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS org_employees (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE CASCADE,
+                ku_email VARCHAR(100) NOT NULL,
+                emp_policy_days SMALLINT DEFAULT 1,
+                is_active BOOLEAN DEFAULT true,
+                create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(org_id, ku_email)
+            );
+        `);
+
+        // 8. เพิ่มคอลัมน์เก็บชื่อคนออกรหัสในตาราง wifi_credentials
+        await pool.query(`
+            ALTER TABLE wifi_credentials 
+            ADD COLUMN IF NOT EXISTS issued_by VARCHAR(100) DEFAULT 'Admin';
+        `);
+
         console.log("✅ อัปเกรด PostgreSQL Database Schema ใหม่สำเร็จ");
     } catch (err) {
         console.error("❌ Database Init Error:", err);
