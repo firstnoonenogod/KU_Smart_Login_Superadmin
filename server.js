@@ -259,13 +259,13 @@ app.get('/api/auth/ku-callback', async (req, res) => {
 
 // บันทึกการออกรหัส Wi-Fi (รับข้อมูลจาก Kiosk)
 app.post('/api/admin/issue-wifi', async (req, res) => {
-    const { org_id, username, password, id_card , issued_by} = req.body; 
+    const { org_id, username, password, id_card, issued_by } = req.body; 
     const client = await pool.connect();
     
     try {
         await client.query('BEGIN');
 
-        // คำนวณเวลาหมดอายุจากโควตา
+        // คำนวณเวลาหมดอายุจากโควตา (นับจากวันที่ปัจจุบัน)
         const orgRes = await client.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
         const policyDays = orgRes.rows.length > 0 ? orgRes.rows[0].user_policy_days : 1;
         const expireTime = new Date();
@@ -286,11 +286,26 @@ app.post('/api/admin/issue-wifi', async (req, res) => {
             userId = newUser.rows[0].id;
         }
 
-        // บันทึกรหัสผ่านใหม่
-        await client.query(`
-            INSERT INTO wifi_credentials (user_id, password, expire_time, issued_by)
-            VALUES ($1, $2, $3)
-        `, [userId, password, expireTime]);
+        // เช็คว่ามีประวัติรับรหัสเดิมอยู่ไหม เพื่อ Reset สิทธิ์และเวลา
+        const existingCred = await client.query('SELECT id FROM wifi_credentials WHERE user_id = $1', [userId]);
+
+        if (existingCred.rows.length > 0) {
+            // อัปเดตเวลาลงทะเบียนใหม่ (create_time) และต่อเวลาหมดอายุ (expire_time) ให้ใหม่
+            await client.query(`
+                UPDATE wifi_credentials 
+                SET password = $1, 
+                    expire_time = $2, 
+                    create_time = CURRENT_TIMESTAMP, 
+                    issued_by = $3
+                WHERE user_id = $4
+            `, [password, expireTime, issued_by || 'Admin', userId]);
+        } else {
+            // ถ้าเพิ่งเคยรับครั้งแรก ให้สร้างใหม่
+            await client.query(`
+                INSERT INTO wifi_credentials (user_id, password, expire_time, issued_by)
+                VALUES ($1, $2, $3, $4)
+            `, [userId, password, expireTime, issued_by || 'Admin']);
+        }
 
         // อัปเดตยอดการออกบัตรรายวัน
         await client.query(`
