@@ -516,7 +516,7 @@ async function deleteEmpFromSuperAdmin(empId, orgId) {
 
 async function loadEmployees() {
     if (!currentOrgId) return;
-    const res = await fetch(`http://158.108.217.46:3000/api/admin/employees?org_id=${currentOrgId}`);
+    const res = await fetch(`http://127.0.0.1:3000/api/admin/employees?org_id=${currentOrgId}`);
     const result = await res.json();
     const tbody = document.getElementById('employee-table-body');
     tbody.innerHTML = '';
@@ -527,7 +527,7 @@ async function loadEmployees() {
 
 document.getElementById('add-employee-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const res = await fetch('http://158.108.217.46:3000/api/admin/employees', {
+    const res = await fetch('http://127.0.0.1:3000/api/admin/employees', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ org_id: currentOrgId, ku_email: document.getElementById('empEmail').value, emp_policy_days: document.getElementById('empDays').value })
     });
@@ -538,7 +538,7 @@ document.getElementById('add-employee-form')?.addEventListener('submit', async (
 
 async function deleteEmployee(empId) {
     if(!confirm('ลบสิทธิ์พนักงานคนนี้?')) return;
-    await fetch(`http://158.108.217.46:3000/api/admin/employees/${empId}`, { method: 'DELETE' });
+    await fetch(`http://127.0.0.1:3000/api/admin/employees/${empId}`, { method: 'DELETE' });
     loadEmployees();
 }
 
