@@ -315,43 +315,58 @@ async function loadSelectedOrgAnalytics() {
 }
 
 // 3. ฟังก์ชันระบบฟิลเตอร์คัดกรองช่วงเวลาผู้ใช้ (วันนี้ / สัปดาห์นี้ / เดือนนี้)
+// ตัวแปรสำหรับจำค่าว่าตอนนี้กำลังเลือกช่วงเวลาไหนอยู่
+let currentTimeframe = 'all';
+
 window.filterUserTimeframe = function(timeframe) {
-    document.getElementById('timeframeSelector').value = timeframe;
+    currentTimeframe = timeframe;
     const selectedEmp = document.getElementById('employeeSelector').value; // รับค่าพนักงาน
 
+    // 1. อัปเดตสีปุ่มให้รู้ว่าปุ่มไหนกำลังถูกกดอยู่ (Active)
+    document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+    const activeButton = document.getElementById(`filter-${timeframe}`);
+    if (activeButton) activeButton.classList.add('active');
+
+    // 2. เริ่มกรองข้อมูล
     const now = new Date();
     const filteredUsers = currentLoadedHistory.filter(user => {
         const userDate = new Date(user.created_at);
         let timeMatch = true;
-
+        
         if (timeframe === 'today') {
             timeMatch = userDate.toDateString() === now.toDateString();
-        } else if (timeframe === '7days') {
+        } else if (timeframe === 'week') { // แก้จาก '7days' ให้ตรงกับ HTML ของคุณ
             const past7Days = new Date();
             past7Days.setDate(now.getDate() - 7);
             timeMatch = userDate >= past7Days;
-        } else if (timeframe === '30days') {
+        } else if (timeframe === 'month') { // แก้จาก '30days' ให้ตรงกับ HTML ของคุณ
             const past30Days = new Date();
             past30Days.setDate(now.getDate() - 30);
             timeMatch = userDate >= past30Days;
         }
-
-        // เช็คเพิ่มว่าตรงกับพนักงานที่เลือกไหม
+        
+        // เช็คว่าตรงกับพนักงานที่เลือกไหม
         const empMatch = selectedEmp === 'all' || user.issued_by === selectedEmp;
-
+        
         return timeMatch && empMatch;
     });
 
-    // คำนวณกราฟโดนัทใหม่สดๆ จากข้อมูลที่ถูกกรอง!
+    // 3. คำนวณกราฟโดนัทใหม่สดๆ จากข้อมูลที่ถูกกรอง!
     let active = 0, inactive = 0;
     filteredUsers.forEach(u => {
         if (now <= new Date(u.expire_time)) active++;
         else inactive++;
     });
-
-    lastActiveCount = -1; // บังคับให้กราฟโดนัทรีเฟรช
-    renderOrgDoughnutChart(active, inactive);
-    renderAnalyticsTable(filteredUsers);
+    
+    // 4. สั่งวาดกราฟและตารางใหม่
+    if (typeof renderOrgDoughnutChart === "function") {
+        lastActiveCount = -1; // บังคับให้กราฟโดนัทรีเฟรช
+        renderOrgDoughnutChart(active, inactive);
+    }
+    
+    if (typeof renderAnalyticsTable === "function") {
+        renderAnalyticsTable(filteredUsers);
+    }
 };
 
 // 4. ฟังก์ชันวาดรายชื่อข้อมูลผู้ใช้ลงตารางประวัติ
