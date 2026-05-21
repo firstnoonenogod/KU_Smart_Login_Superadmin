@@ -62,18 +62,30 @@ async function fetchOrganizations() {
             ? '<span class="text-success fw-bold">ถาวร</span>' 
             : `<span class="text-danger fw-bold">ชั่วคราว</span>`;
 
-        tbody.innerHTML += `
-            <tr>
-                <td class="px-4">${esc(org.name)} <br> ${typeBadge}</td>
-                <td><span class="badge bg-secondary">${esc(org.admin_user)}</span></td>
-                <td>ให้ User ละ ${org.user_policy_days} วัน</td>
-                <td>${expiryText}</td>
-                <td class="text-center">
-                    <button class="btn btn-sm btn-primary shadow-sm rounded-pill px-3 me-1" onclick="shortcutToAnalytics(${org.id})">ดูข้อมูล</button>
-                    <button class="btn btn-sm btn-danger shadow-sm rounded-pill px-3" onclick="deleteOrg(${org.id}, '${org.name}')">ลบ</button>
-                </td>
-            </tr>
-        `;
+    tbody.innerHTML += `
+        <tr class="align-middle">
+            <td class="px-4">${esc(org.name)} <br> ${typeBadge}</td>
+            <td><span class="badge bg-secondary">${esc(org.admin_user)}</span></td>
+            <td>ให้ User ละ ${org.user_policy_days} วัน</td>
+            <td>${expiryText}</td>
+            <td class="text-center">
+                <button class="btn btn-sm btn-info shadow-sm rounded-pill px-3 me-1 text-white" onclick="toggleEmployeeRow(${org.id})">👥 ดูพนักงาน</button>
+                <button class="btn btn-sm btn-primary shadow-sm rounded-pill px-3 me-1" onclick="shortcutToAnalytics(${org.id})">ดูกราฟ</button>
+                <button class="btn btn-sm btn-danger shadow-sm rounded-pill px-3" onclick="deleteOrg(${org.id}, '${org.name}')">ลบ</button>
+            </td>
+        </tr>
+        <tr id="emp-row-${org.id}" class="d-none bg-light">
+            <td colspan="5" class="p-3">
+                <div class="card card-body border-0 shadow-sm">
+                    <h6 class="text-primary fw-bold mb-3">รายชื่อพนักงานที่ได้รับสิทธิ์ KU ALL-Login (องค์กร: ${esc(org.name)})</h6>
+                    <table class="table table-sm table-bordered mb-0 bg-white">
+                        <thead class="table-secondary"><tr><th>อีเมลพนักงาน</th><th>โควตา (วัน)</th><th class="text-center">จัดการ</th></tr></thead>
+                        <tbody id="emp-tbody-${org.id}"><tr><td colspan="3" class="text-center text-muted">กำลังดึงข้อมูล...</td></tr></tbody>
+                    </table>
+                </div>
+            </td>
+        </tr>
+    `;
     });
     // สั่งอัปเดตแผนภูมิแท่งเปรียบเทียบยอดหน้าแรกทันที
     renderGlobalBarChart(orgs);
@@ -288,6 +300,12 @@ async function loadSelectedOrgAnalytics() {
             if (lastHistoryJSON !== currentHistoryJSON) {
                 lastHistoryJSON = currentHistoryJSON;
                 currentLoadedHistory = data.history;
+                const empSelect = document.getElementById('employeeSelector');
+                empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
+                const uniqueEmps = [...new Set(data.history.map(u => u.issued_by).filter(Boolean))];
+                uniqueEmps.forEach(emp => {
+                    empSelect.innerHTML += `<option value="${emp}">${emp}</option>`;
+                });
                 filterUserTimeframe('all'); 
             }
         }
@@ -297,31 +315,44 @@ async function loadSelectedOrgAnalytics() {
 }
 
 // 3. ฟังก์ชันระบบฟิลเตอร์คัดกรองช่วงเวลาผู้ใช้ (วันนี้ / สัปดาห์นี้ / เดือนนี้)
-function filterUserTimeframe(range) {
-    // เปลี่ยนสถานะปุ่ม Active สวยงาม
-    document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`filter-${range}`).classList.add('active');
-    
+window.filterUserTimeframe = function(timeframe) {
+    document.getElementById('timeframeSelector').value = timeframe;
+    const selectedEmp = document.getElementById('employeeSelector').value; // รับค่าพนักงาน
+
     const now = new Date();
-    const todayStr = now.toLocaleDateString('th-TH');
-    
-    // กรองข้อมูลใน Array บนหน้าบ้านทันที รวดเร็วและไม่ต้องยิงฐานข้อมูลซ้ำซ้อน
-    const filtered = currentLoadedHistory.filter(user => {
-        const createDate = new Date(user.created_at);
-        if (range === 'today') {
-            return createDate.toLocaleDateString('th-TH') === todayStr;
-        } else if (range === 'week') {
-            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-            return createDate >= sevenDaysAgo;
-        } else if (range === 'month') {
-            return createDate.getMonth() === now.getMonth() && createDate.getFullYear() === now.getFullYear();
+    const filteredUsers = currentLoadedHistory.filter(user => {
+        const userDate = new Date(user.created_at);
+        let timeMatch = true;
+
+        if (timeframe === 'today') {
+            timeMatch = userDate.toDateString() === now.toDateString();
+        } else if (timeframe === '7days') {
+            const past7Days = new Date();
+            past7Days.setDate(now.getDate() - 7);
+            timeMatch = userDate >= past7Days;
+        } else if (timeframe === '30days') {
+            const past30Days = new Date();
+            past30Days.setDate(now.getDate() - 30);
+            timeMatch = userDate >= past30Days;
         }
-        return true; // คืนค่าทั้งหมด
+
+        // เช็คเพิ่มว่าตรงกับพนักงานที่เลือกไหม
+        const empMatch = selectedEmp === 'all' || user.issued_by === selectedEmp;
+
+        return timeMatch && empMatch;
     });
-    
-    // สั่งวาดข้อมูลลงตารางวิเคราะห์
-    renderAnalyticsTable(filtered);
-}
+
+    // คำนวณกราฟโดนัทใหม่สดๆ จากข้อมูลที่ถูกกรอง!
+    let active = 0, inactive = 0;
+    filteredUsers.forEach(u => {
+        if (now <= new Date(u.expire_time)) active++;
+        else inactive++;
+    });
+
+    lastActiveCount = -1; // บังคับให้กราฟโดนัทรีเฟรช
+    renderOrgDoughnutChart(active, inactive);
+    renderAnalyticsTable(filteredUsers);
+};
 
 // 4. ฟังก์ชันวาดรายชื่อข้อมูลผู้ใช้ลงตารางประวัติ
 function renderAnalyticsTable(users) {
@@ -452,6 +483,36 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
         window.location.href = 'login.html';
     }
 });
+
+async function toggleEmployeeRow(orgId) {
+    const row = document.getElementById(`emp-row-${orgId}`);
+    if (row.classList.contains('d-none')) {
+        row.classList.remove('d-none');
+        const res = await fetch(`/api/admin/employees?org_id=${orgId}`);
+        const result = await res.json();
+        const tbody = document.getElementById(`emp-tbody-${orgId}`);
+        if (result.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">ยังไม่มีการเพิ่มพนักงานในองค์กรนี้</td></tr>';
+        } else {
+            tbody.innerHTML = result.data.map(emp => `
+                <tr>
+                    <td class="fw-bold">${emp.ku_email}</td>
+                    <td>${emp.emp_policy_days}</td>
+                    <td class="text-center"><button class="btn btn-sm btn-outline-danger py-0" onclick="deleteEmpFromSuperAdmin(${emp.id}, ${orgId})">ลบสิทธิ์</button></td>
+                </tr>
+            `).join('');
+        }
+    } else {
+        row.classList.add('d-none');
+    }
+}
+
+async function deleteEmpFromSuperAdmin(empId, orgId) {
+    if(!confirm('ยืนยันการลบสิทธิ์พนักงาน?')) return;
+    await fetch(`/api/admin/employees/${empId}`, { method: 'DELETE' });
+    document.getElementById(`emp-row-${orgId}`).classList.add('d-none'); 
+    toggleEmployeeRow(orgId); // โหลดใหม่
+}
 
 async function loadEmployees() {
     if (!currentOrgId) return;

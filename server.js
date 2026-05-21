@@ -335,6 +335,7 @@ app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
                     u.username, 
                     c.create_time as created_at, 
                     c.expire_time,
+                    c.issued_by,
                     COALESCE(o.org_name, 'องค์กรที่ถูกลบไปแล้ว') as org_name
                 FROM wifi_users u
                 JOIN wifi_credentials c ON u.id = c.user_id
