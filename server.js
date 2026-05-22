@@ -250,8 +250,8 @@ app.get('/api/auth/ku-callback', async (req, res) => {
         const employeeData = empCheck.rows[0];
         const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '8h' });
 
-        // กลับไปหน้าตู้ Kiosk พอร์ต 8000
-        res.redirect(`${process.env.KIOSK_URL}/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
+        // กลับไปหน้าตู้ Kiosk พอร์ต 8000 ผ่าน localhost
+        res.redirect(`http://localhost:8000/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
     } catch (err) {
         res.status(500).send("SSO Error: ไม่สามารถเข้าสู่ระบบได้");
     }
