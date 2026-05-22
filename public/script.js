@@ -547,32 +547,80 @@ async function deleteEmpFromSuperAdmin(empId, orgId) {
     toggleEmployeeRow(orgId); // โหลดใหม่
 }
 
+// ==========================================
+// ส่วนจัดการพนักงาน (Super Admin)
+// ==========================================
 async function loadEmployees() {
     if (!currentOrgId) return;
-    const res = await fetch(`http://127.0.0.1:3000/api/admin/employees?org_id=${currentOrgId}`);
-    const result = await res.json();
-    const tbody = document.getElementById('employee-table-body');
-    tbody.innerHTML = '';
-    result.data.forEach(emp => {
-        tbody.innerHTML += `<tr><td class="fw-bold text-primary">${emp.ku_email}</td><td>${emp.emp_policy_days} วัน</td><td class="text-center"><button class="btn btn-sm btn-danger px-3" onclick="deleteEmployee(${emp.id})">ลบสิทธิ์</button></td></tr>`;
-    });
+    try {
+        // 📌 เพิ่ม headers เพื่อส่ง Token ยืนยันตัวตน
+        const res = await fetch(`/api/admin/employees?org_id=${currentOrgId}`, {
+            headers: { 'Authorization': `Bearer ${token}` } 
+        });
+        const result = await res.json();
+        
+        // 📌 ดัก Error กรณีไม่มีข้อมูลหรือ Token หมดอายุ
+        if (!result.success || !result.data) {
+            console.error("โหลดข้อมูลพนักงานไม่ได้:", result.message);
+            return;
+        }
+
+        const tbody = document.getElementById('employee-table-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        if (result.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted p-4">ยังไม่มีพนักงานในองค์กรนี้</td></tr>';
+            return;
+        }
+
+        result.data.forEach(emp => {
+            tbody.innerHTML += `
+                <tr>
+                    <td class="fw-bold text-success">${esc(emp.ku_email)}</td>
+                    <td>ให้ User ละ ${emp.emp_policy_days} วัน</td>
+                    <td><button class="btn btn-sm btn-danger rounded-pill px-3" onclick="deleteEmployee(${emp.id})">ลบสิทธิ์</button></td>
+                </tr>`;
+        });
+    } catch (e) {
+        console.error("เชื่อมต่อระบบจัดการพนักงานล้มเหลว", e);
+    }
 }
 
 document.getElementById('add-employee-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const res = await fetch('http://127.0.0.1:3000/api/admin/employees', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: currentOrgId, ku_email: document.getElementById('empEmail').value, emp_policy_days: document.getElementById('empDays').value })
-    });
-    const result = await res.json();
-    if (result.success) { document.getElementById('empEmail').value = ''; loadEmployees(); }
-    else alert(result.message);
+    try {
+        const res = await fetch('/api/admin/employees', {
+            method: 'POST', 
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // ส่ง Token ไปด้วย
+            },
+            body: JSON.stringify({ org_id: currentOrgId, ku_email: document.getElementById('empEmail').value, emp_policy_days: document.getElementById('empDays').value })
+        });
+        const result = await res.json();
+        if (result.success) { 
+            document.getElementById('empEmail').value = ''; 
+            loadEmployees(); 
+        } else { 
+            alert(result.message); 
+        }
+    } catch (e) {
+        alert("เซิร์ฟเวอร์มีปัญหา");
+    }
 });
 
 async function deleteEmployee(empId) {
     if(!confirm('ลบสิทธิ์พนักงานคนนี้?')) return;
-    await fetch(`http://127.0.0.1:3000/api/admin/employees/${empId}`, { method: 'DELETE' });
-    loadEmployees();
+    try {
+        await fetch(`/api/admin/employees/${empId}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` } // ส่ง Token ไปด้วย
+        });
+        loadEmployees();
+    } catch (e) {
+        alert("เซิร์ฟเวอร์มีปัญหา");
+    }
 }
 
 if(document.getElementById('employee-table-body')) loadEmployees();
