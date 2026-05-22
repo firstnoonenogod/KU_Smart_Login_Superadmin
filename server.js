@@ -19,11 +19,18 @@ app.use(express.static(path.join(__dirname, 'public')));
 // เริ่มต้นโครงสร้างฐานข้อมูล
 initDb();
 
-// Middleware ตรวจสอบสิทธิ์ Super Admin
-function requireSuperAdmin(req, res, next) {
+// Middleware ตรวจสอบสิทธิ์ (รับทั้ง Token ของ Super Admin และ Key ของตู้ Kiosk)
+function requireAuth(req, res, next) {
+    // 1. อนุญาตถ้าเป็นตู้ Kiosk (เช็คจาก X-Internal-Key)
+    const internalKey = req.headers['x-internal-key'];
+    if (internalKey && internalKey === process.env.INTERNAL_API_KEY) {
+        return next();
+    }
+
+    // 2. อนุญาตถ้าเป็น Super Admin (เช็คจาก Token หน้าเว็บ)
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ success: false, message: "Unauthorized: ไม่พบ Token" });
+        return res.status(401).json({ success: false, message: "Unauthorized: ไม่พบ Token หรือ API Key" });
     }
     
     const token = authHeader.split(' ')[1];
@@ -190,7 +197,7 @@ app.post('/api/admin/login', async (req, res) => {
 });
 
 // --- 1. API ดึงรายชื่อพนักงาน ---
-app.get('/api/admin/employees', requireSuperAdmin, async (req, res) => {
+app.get('/api/admin/employees', requireAuth, async (req, res) => {
     const org_id = req.query.org_id; 
     try {
         const result = await pool.query('SELECT * FROM org_employees WHERE org_id = $1 ORDER BY id DESC', [org_id]);
@@ -201,7 +208,7 @@ app.get('/api/admin/employees', requireSuperAdmin, async (req, res) => {
 });
 
 // --- 2. API เพิ่มพนักงาน ---
-app.post('/api/admin/employees', requireSuperAdmin, async (req, res) => {
+app.post('/api/admin/employees', requireAuth, async (req, res) => {
     const { org_id, ku_email, emp_policy_days } = req.body;
     try {
         const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
@@ -216,7 +223,7 @@ app.post('/api/admin/employees', requireSuperAdmin, async (req, res) => {
 });
 
 // --- 3. API ลบพนักงาน ---
-app.delete('/api/admin/employees/:id', requireSuperAdmin, async (req, res) => {
+app.delete('/api/admin/employees/:id', requireAuth, async (req, res) => {
     try {
         await pool.query('DELETE FROM org_employees WHERE id = $1', [req.params.id]);
         res.json({ success: true, message: "ลบสิทธิ์พนักงานสำเร็จ" });
@@ -265,7 +272,7 @@ function requireInternalKey(req, res, next) {
 }
 
 // บันทึกการออกรหัส Wi-Fi (รับข้อมูลจาก Kiosk)
-app.post('/api/admin/issue-wifi', requireSuperAdmin, async (req, res) => {
+app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
     const { org_id, username, password, id_card, issued_by } = req.body; 
     const client = await pool.connect();
     
