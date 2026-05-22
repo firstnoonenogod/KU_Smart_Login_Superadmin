@@ -190,7 +190,7 @@ app.post('/api/admin/login', async (req, res) => {
 });
 
 // --- 1. API ดึงรายชื่อพนักงาน ---
-app.get('/api/admin/employees', async (req, res) => {
+app.get('/api/admin/employees', requireSuperAdmin, async (req, res) => {
     const org_id = req.query.org_id; 
     try {
         const result = await pool.query('SELECT * FROM org_employees WHERE org_id = $1 ORDER BY id DESC', [org_id]);
@@ -201,7 +201,7 @@ app.get('/api/admin/employees', async (req, res) => {
 });
 
 // --- 2. API เพิ่มพนักงาน ---
-app.post('/api/admin/employees', async (req, res) => {
+app.post('/api/admin/employees', requireSuperAdmin, async (req, res) => {
     const { org_id, ku_email, emp_policy_days } = req.body;
     try {
         const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
@@ -216,7 +216,7 @@ app.post('/api/admin/employees', async (req, res) => {
 });
 
 // --- 3. API ลบพนักงาน ---
-app.delete('/api/admin/employees/:id', async (req, res) => {
+app.delete('/api/admin/employees/:id', requireSuperAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM org_employees WHERE id = $1', [req.params.id]);
         res.json({ success: true, message: "ลบสิทธิ์พนักงานสำเร็จ" });
@@ -251,14 +251,21 @@ app.get('/api/auth/ku-callback', async (req, res) => {
         const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '8h' });
 
         // กลับไปหน้าตู้ Kiosk พอร์ต 8000
-        res.redirect(`http://158.108.217.46:8000/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
+        res.redirect(`${process.env.KIOSK_URL}/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
     } catch (err) {
         res.status(500).send("SSO Error: ไม่สามารถเข้าสู่ระบบได้");
     }
 });
 
+function requireInternalKey(req, res, next) {
+    if (req.headers['x-internal-key'] !== process.env.INTERNAL_API_KEY) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+}
+
 // บันทึกการออกรหัส Wi-Fi (รับข้อมูลจาก Kiosk)
-app.post('/api/admin/issue-wifi', async (req, res) => {
+app.post('/api/admin/issue-wifi', requireSuperAdmin, async (req, res) => {
     const { org_id, username, password, id_card, issued_by } = req.body; 
     const client = await pool.connect();
     

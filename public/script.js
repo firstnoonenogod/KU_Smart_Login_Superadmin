@@ -1,6 +1,7 @@
 let lastActiveCount = null;
 let lastInactiveCount = null;
 let lastHistoryJSON = "";
+let empPerformanceChartInstance = null;
 
 const currentOrgId = sessionStorage.getItem('org_id'); // ดึง ID องค์กรตอนแอดมินล็อกอิน
 const token = sessionStorage.getItem('superAdminToken');
@@ -302,7 +303,7 @@ async function loadSelectedOrgAnalytics() {
                 currentLoadedHistory = data.history;
                 const empSelect = document.getElementById('employeeSelector');
                 empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
-                const uniqueEmps = [...new Set(data.history.map(u => u.issued_by).filter(Boolean))];
+                const uniqueEmps = [...new Set(data.history.map(u => u.issued_by || 'Admin'))];
                 uniqueEmps.forEach(emp => {
                     empSelect.innerHTML += `<option value="${emp}">${emp}</option>`;
                 });
@@ -320,52 +321,72 @@ let currentTimeframe = 'all';
 
 window.filterUserTimeframe = function(timeframe) {
     currentTimeframe = timeframe;
-    const selectedEmp = document.getElementById('employeeSelector').value; // รับค่าพนักงาน
+    const selectedEmp = document.getElementById('employeeSelector').value;
 
-    // 1. อัปเดตสีปุ่มให้รู้ว่าปุ่มไหนกำลังถูกกดอยู่ (Active)
     document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
     const activeButton = document.getElementById(`filter-${timeframe}`);
     if (activeButton) activeButton.classList.add('active');
 
-    // 2. เริ่มกรองข้อมูล
+    // ย้ายการกำหนดวันที่มาไว้ "นอก Loop" เพื่อป้องกันบั๊กวันที่เพี้ยน
     const now = new Date();
-    const filteredUsers = currentLoadedHistory.filter(user => {
+    const todayStr = now.toDateString();
+    
+    const past7Days = new Date(); 
+    past7Days.setDate(now.getDate() - 7);
+    
+    const past30Days = new Date(); 
+    past30Days.setDate(now.getDate() - 30);
+
+    // 1. กรองตามช่วงเวลา
+    let filteredUsers = currentLoadedHistory.filter(user => {
         const userDate = new Date(user.created_at);
-        let timeMatch = true;
-        
-        if (timeframe === 'today') {
-            timeMatch = userDate.toDateString() === now.toDateString();
-        } else if (timeframe === 'week') { // แก้จาก '7days' ให้ตรงกับ HTML ของคุณ
-            const past7Days = new Date();
-            past7Days.setDate(now.getDate() - 7);
-            timeMatch = userDate >= past7Days;
-        } else if (timeframe === 'month') { // แก้จาก '30days' ให้ตรงกับ HTML ของคุณ
-            const past30Days = new Date();
-            past30Days.setDate(now.getDate() - 30);
-            timeMatch = userDate >= past30Days;
-        }
-        
-        // เช็คว่าตรงกับพนักงานที่เลือกไหม
-        const empMatch = selectedEmp === 'all' || user.issued_by === selectedEmp;
-        
-        return timeMatch && empMatch;
+        if (timeframe === 'today') return userDate.toDateString() === todayStr;
+        if (timeframe === 'week') return userDate >= past7Days;
+        if (timeframe === 'month') return userDate >= past30Days;
+        return true;
     });
 
-    // 3. คำนวณกราฟโดนัทใหม่สดๆ จากข้อมูลที่ถูกกรอง!
-    let active = 0, inactive = 0;
-    filteredUsers.forEach(u => {
-        if (now <= new Date(u.expire_time)) active++;
-        else inactive++;
-    });
-    
-    // 4. สั่งวาดกราฟและตารางใหม่
-    if (typeof renderOrgDoughnutChart === "function") {
-        lastActiveCount = -1; // บังคับให้กราฟโดนัทรีเฟรช
-        renderOrgDoughnutChart(active, inactive);
-    }
-    
-    if (typeof renderAnalyticsTable === "function") {
-        renderAnalyticsTable(filteredUsers);
+    // 2. คำนวณรหัส Wi-Fi แบบไม่ซ้ำ (Unique Users)
+    const uniqueUsersMap = new Map();
+    filteredUsers.forEach(u => uniqueUsersMap.set(u.id_card, u));
+    const uniqueUsersList = Array.from(uniqueUsersMap.values());
+
+    const chartContainer = document.getElementById('emp-chart-container');
+    const singleStatContainer = document.getElementById('single-emp-stat');
+
+    // 3. แสดงผลตามการเลือกพนักงาน
+    if (selectedEmp === 'all') {
+        chartContainer.classList.remove('d-none');
+        singleStatContainer.classList.add('d-none');
+        
+        const empCounts = {};
+        uniqueUsersList.forEach(u => {
+            const empName = u.issued_by || 'Admin'; // ป้องกันค่าว่าง
+            empCounts[empName] = (empCounts[empName] || 0) + 1;
+        });
+
+        if (empPerformanceChartInstance) empPerformanceChartInstance.destroy();
+        const ctx = document.getElementById('empPerformanceChart').getContext('2d');
+        empPerformanceChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(empCounts),
+                datasets: [{ data: Object.values(empCounts), backgroundColor: ['#006664', '#B2BB1E', '#17a2b8', '#ffc107', '#6c757d'] }]
+            },
+            options: { maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+        });
+        
+        renderAnalyticsTable(uniqueUsersList);
+        
+    } else {
+        chartContainer.classList.add('d-none');
+        singleStatContainer.classList.remove('d-none');
+        
+        // ต้องดักค่าว่างเป็น 'Admin' เพื่อให้กรองตรงกับ Dropdown
+        const myUniqueUsers = uniqueUsersList.filter(u => (u.issued_by || 'Admin') === selectedEmp);
+        document.getElementById('single-emp-count').innerText = myUniqueUsers.length;
+        
+        renderAnalyticsTable(myUniqueUsers);
     }
 };
 
@@ -395,6 +416,7 @@ function renderAnalyticsTable(users) {
                 <td><span class="badge bg-light text-dark border font-mono">${esc(user.username)}</span></td>
                 <td><small class="text-primary fw-semibold">${esc(user.org_name)}</small></td>
                 <td><small>${dateStr}</small></td>
+                <td><span class="badge bg-info text-dark shadow-sm">${esc(user.issued_by || 'Admin')}</span></td> <td><small>${dateStr}</small></td>
                 <td class="text-center">${badge}</td>
             </tr>
         `;
@@ -426,6 +448,7 @@ function renderGlobalBarChart(orgs) {
             },
             options: {
                 responsive: true,
+                indexAxis: 'y',
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
                 scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
