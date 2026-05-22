@@ -64,7 +64,7 @@ app.post('/api/superadmin/login', async (req, res) => {
 });
 
 // ดึงข้อมูลสถิติภาพรวม
-app.get('/api/dashboard/stats', requireSuperAdmin, async (req, res) => {
+app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
     try {
         const orgCount = await pool.query('SELECT COUNT(*) FROM organizations');
         const userCount = await pool.query('SELECT COUNT(DISTINCT card_id) FROM wifi_users');
@@ -79,7 +79,7 @@ app.get('/api/dashboard/stats', requireSuperAdmin, async (req, res) => {
 });
 
 // ดึงรายชื่อองค์กรทั้งหมด (พร้อมนับจำนวนยอดผู้ใช้งานจริงรายองค์กร)
-app.get('/api/organizations', requireSuperAdmin, async (req, res) => {
+app.get('/api/organizations', requireAuth, async (req, res) => {
     try {
         const query = `
             SELECT o.org_id, o.org_name, o.org_type, o.admin_user, o.user_policy_days,
@@ -105,7 +105,7 @@ app.get('/api/organizations', requireSuperAdmin, async (req, res) => {
 });
 
 // สร้างบัญชีองค์กรใหม่
-app.post('/api/organizations', requireSuperAdmin, async (req, res) => {
+app.post('/api/organizations', requireAuth, async (req, res) => {
     const { name, org_type, admin_validity_days, user_policy_days } = req.body;
     const admin_user = "admin_" + Math.random().toString(36).substr(2, 5);
     const plain_admin_pass = Math.random().toString(36).slice(-8);
@@ -141,7 +141,7 @@ app.post('/api/organizations', requireSuperAdmin, async (req, res) => {
 });
 
 // ลบองค์กร
-app.delete('/api/organizations/:id', requireSuperAdmin, async (req, res) => {
+app.delete('/api/organizations/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     try {
         await pool.query('DELETE FROM organizations WHERE org_id = $1', [id]);
@@ -341,7 +341,7 @@ app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
 });
 
 // ดึงข้อมูล Dashboard ขององค์กร และประวัติผู้ใช้งาน
-app.get('/api/dashboard/org/:id', requireSuperAdmin, async (req, res) => {
+app.get('/api/dashboard/org/:id', requireAuth, async (req, res) => {
     const orgId = req.params.id;
     try {
         let statsQuery;
