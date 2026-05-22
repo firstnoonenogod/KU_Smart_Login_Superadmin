@@ -289,11 +289,6 @@ async function loadSelectedOrgAnalytics() {
         const data = await res.json();
         
         if (data.success) {
-            document.getElementById('ana-today').innerText = data.stats.today;
-            document.getElementById('ana-week').innerText = data.stats.this_week;
-            document.getElementById('ana-month').innerText = data.stats.this_month;
-            document.getElementById('ana-3month').innerText = data.stats.three_months;
-            
             renderOrgDoughnutChart(data.activeCount, data.inactiveCount);
             
             // ตรวจสอบโครงสร้างเนื้อหาข้อมูลประวัติ หากไม่มีสมาชิกใหม่เพิ่มเข้ามาจริง จะข้ามการวาดตารางใหม่
