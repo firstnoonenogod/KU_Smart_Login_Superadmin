@@ -10,9 +10,17 @@ const app = express();
 const PORT = 3000;
 const SUPER_HASH = process.env.SUPERADMIN_PASS;
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
 app.use(cors({
-    origin: ['http://158.108.217.46:8000', 'http://localhost:8000', 'http://158.108.217.46:3000', 'http://localhost:3000']
+    origin: (origin, callback) => {
+        // อนุญาต same-origin (ไม่มี origin header) เสมอ
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        callback(new Error(`CORS blocked: ${origin}`));
+    },
+    credentials: true
 }));
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -258,8 +266,8 @@ app.get('/api/auth/ku-callback', async (req, res) => {
         const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '8h' });
 
         // กลับไปหน้าตู้ Kiosk พอร์ต 8000 ผ่าน localhost
-        res.redirect(`http://localhost:8000/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);
-    } catch (err) {
+        const KIOSK_PUBLIC_URL = process.env.KIOSK_PUBLIC_URL || 'http://localhost:8000';
+        res.redirect(`${KIOSK_PUBLIC_URL}/?token=${kioskToken}&orgName=${encodeURIComponent(employeeData.org_name)}`);    } catch (err) {
         res.status(500).send("SSO Error: ไม่สามารถเข้าสู่ระบบได้");
     }
 });
