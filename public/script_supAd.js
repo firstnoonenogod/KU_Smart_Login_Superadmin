@@ -458,10 +458,12 @@ async function toggleEmployeeRow(orgId) {
     const row = document.getElementById(`emp-row-${orgId}`);
     if (row.classList.contains('d-none')) {
         row.classList.remove('d-none');
-        const res = await fetch(`/api/admin/employees?org_id=${orgId}`);
+        const res = await fetch(`/api/admin/employees?org_id=${orgId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         const result = await res.json();
         const tbody = document.getElementById(`emp-tbody-${orgId}`);
-        if (result.data.length === 0) {
+        if (!result.success || !result.data || result.data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">ยังไม่มีการเพิ่มพนักงานในองค์กรนี้</td></tr>';
         } else {
             tbody.innerHTML = result.data.map(emp => `
@@ -479,7 +481,10 @@ async function toggleEmployeeRow(orgId) {
 
 async function deleteEmpFromSuperAdmin(empId, orgId) {
     if(!confirm('ยืนยันการลบสิทธิ์พนักงาน?')) return;
-    await fetch(`/api/admin/employees/${empId}`, { method: 'DELETE' });
+    await fetch(`/api/admin/employees/${empId}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
     document.getElementById(`emp-row-${orgId}`).classList.add('d-none'); 
     toggleEmployeeRow(orgId); // โหลดใหม่
 }
@@ -490,7 +495,7 @@ async function deleteEmpFromSuperAdmin(empId, orgId) {
 async function loadEmployees() {
     if (!currentOrgId) return;
     try {
-        // 📌 เพิ่ม headers เพื่อส่ง Token ยืนยันตัวตน
+        // เพิ่ม headers เพื่อส่ง Token ยืนยันตัวตน
         const res = await fetch(`/api/admin/employees?org_id=${currentOrgId}`, {
             headers: { 'Authorization': `Bearer ${token}` } 
         });
