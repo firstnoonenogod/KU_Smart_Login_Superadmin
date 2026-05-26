@@ -542,6 +542,51 @@ app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
     }
 });
 
+// ดึงรายชื่อ staff ที่เคย/ยังไม่เคยออกรหัส สำหรับ dropdown chart
+app.get('/api/dashboard/org/:id/staff', requireAuth, async (req, res) => {
+    const orgId = req.params.id;
+    try {
+        let query;
+        let params = [];
+        
+        if (orgId === 'all') {
+            query = `
+                SELECT 
+                    CASE 
+                        WHEN auth_type = 'local' THEN display_name
+                        WHEN auth_type = 'ku_sso' THEN ku_email
+                    END AS name
+                FROM org_employees 
+                WHERE is_active = true
+                ORDER BY name
+            `;
+        } else {
+            query = `
+                SELECT 
+                    CASE 
+                        WHEN auth_type = 'local' THEN display_name
+                        WHEN auth_type = 'ku_sso' THEN ku_email
+                    END AS name
+                FROM org_employees 
+                WHERE org_id = $1 AND is_active = true
+                ORDER BY name
+            `;
+            params = [orgId];
+        }
+        
+        const result = await pool.query(query, params);
+        const names = result.rows.map(r => r.name).filter(Boolean);
+        
+        res.json({ 
+            success: true, 
+            staff: ['Admin', ...names]
+        });
+    } catch (err) {
+        console.error('Get staff list error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // ดึงข้อมูล Dashboard ขององค์กร และประวัติผู้ใช้งาน
 app.get('/api/dashboard/org/:id', requireAuth, async (req, res) => {
     const orgId = req.params.id;
@@ -628,6 +673,57 @@ app.get('/api/dashboard/org/:id', requireAuth, async (req, res) => {
     } catch (err) {
         console.error("Dashboard Error:", err);
         res.status(500).json({ error: "Database error" });
+    }
+});
+
+// ดึงรายชื่อ staff ที่เคย/ยังไม่เคยออกรหัส สำหรับ dropdown chart
+app.get('/api/dashboard/org/:id/staff', requireAuth, async (req, res) => {
+    const orgId = req.params.id;
+    try {
+        let query;
+        let params = [];
+        
+        if (orgId === 'all') {
+            // ทุก org รวมกัน
+            query = `
+                SELECT 
+                    CASE 
+                        WHEN auth_type = 'local' THEN display_name
+                        WHEN auth_type = 'ku_sso' THEN ku_email
+                    END AS name,
+                    auth_type
+                FROM org_employees 
+                WHERE is_active = true
+                ORDER BY auth_type, name
+            `;
+        } else {
+            query = `
+                SELECT 
+                    CASE 
+                        WHEN auth_type = 'local' THEN display_name
+                        WHEN auth_type = 'ku_sso' THEN ku_email
+                    END AS name,
+                    auth_type
+                FROM org_employees 
+                WHERE org_id = $1 AND is_active = true
+                ORDER BY auth_type, name
+            `;
+            params = [orgId];
+        }
+        
+        const result = await pool.query(query, params);
+        // กรอง null ออกและเพิ่ม 'Admin' ตัวแรกเสมอ
+        const names = result.rows
+            .map(r => r.name)
+            .filter(Boolean);
+        
+        res.json({ 
+            success: true, 
+            staff: ['Admin', ...names]    // Admin = Org Admin ที่ออกรหัสเอง
+        });
+    } catch (err) {
+        console.error('Get staff list error:', err);
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 

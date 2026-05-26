@@ -233,17 +233,57 @@ async function loadSelectedOrgAnalytics() {
             if (lastHistoryJSON !== currentHistoryJSON) {
                 lastHistoryJSON = currentHistoryJSON;
                 currentLoadedHistory = data.history;
-                const empSelect = document.getElementById('employeeSelector');
-                empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
-                const uniqueEmps = [...new Set(data.history.map(u => u.issued_by || 'Admin'))];
-                uniqueEmps.forEach(emp => {
-                    empSelect.innerHTML += `<option value="${emp}">${emp}</option>`;
-                });
-                filterUserTimeframe('all'); 
+                
+                // ดึงรายชื่อ staff ของ org ทั้งหมด (รวมคนที่ยังไม่เคยออกรหัส)
+                await loadStaffDropdown(orgId);
+                
+                filterUserTimeframe('all');
             }
         }
     } catch (e) {
         console.error("โหลดข้อมูล Analytics ไม่สำเร็จ", e);
+    }
+}
+
+// ดึงรายชื่อ staff ทั้งหมดในองค์กรเพื่อใส่ใน dropdown (รวมที่ยังไม่เคยออกรหัส)
+async function loadStaffDropdown(orgId) {
+    try {
+        const res = await fetch(`/api/dashboard/org/${orgId}/staff`, {
+            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
+        });
+        const result = await res.json();
+        
+        const empSelect = document.getElementById('employeeSelector');
+        empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
+        
+        if (result.success && Array.isArray(result.staff)) {
+            result.staff.forEach(name => {
+                empSelect.innerHTML += `<option value="${esc(name)}">${esc(name)}</option>`;
+            });
+        }
+    } catch (e) {
+        console.error('โหลด staff dropdown ไม่สำเร็จ:', e);
+    }
+}
+
+// ดึงรายชื่อ staff ทั้งหมดในองค์กรเพื่อใส่ใน dropdown
+async function loadStaffDropdown(orgId) {
+    try {
+        const res = await fetch(`/api/dashboard/org/${orgId}/staff`, {
+            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
+        });
+        const result = await res.json();
+        
+        const empSelect = document.getElementById('employeeSelector');
+        empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
+        
+        if (result.success && Array.isArray(result.staff)) {
+            result.staff.forEach(name => {
+                empSelect.innerHTML += `<option value="${esc(name)}">${esc(name)}</option>`;
+            });
+        }
+    } catch (e) {
+        console.error('โหลด staff dropdown ไม่สำเร็จ:', e);
     }
 }
 
