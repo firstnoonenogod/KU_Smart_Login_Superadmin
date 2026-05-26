@@ -96,6 +96,60 @@ const initDb = async () => {
             );
         `);
 
+        await pool.query(`
+            DO $$
+            BEGIN
+                -- เพิ่ม columns ถ้ายังไม่มี
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='org_employees' AND column_name='auth_type') THEN
+                    ALTER TABLE org_employees ADD COLUMN auth_type VARCHAR(20) NOT NULL DEFAULT 'ku_sso';
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='org_employees' AND column_name='username') THEN
+                    ALTER TABLE org_employees ADD COLUMN username VARCHAR(50);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='org_employees' AND column_name='password_hash') THEN
+                    ALTER TABLE org_employees ADD COLUMN password_hash CHAR(60);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='org_employees' AND column_name='display_name') THEN
+                    ALTER TABLE org_employees ADD COLUMN display_name VARCHAR(100);
+                END IF;
+                
+                -- ทำให้ ku_email nullable
+                ALTER TABLE org_employees ALTER COLUMN ku_email DROP NOT NULL;
+                
+                -- เพิ่ม constraints (ถ้ายังไม่มี)
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='auth_type_check') THEN
+                    ALTER TABLE org_employees ADD CONSTRAINT auth_type_check 
+                        CHECK (auth_type IN ('ku_sso', 'local'));
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='ku_sso_requires_email') THEN
+                    ALTER TABLE org_employees ADD CONSTRAINT ku_sso_requires_email 
+                        CHECK (auth_type != 'ku_sso' OR ku_email IS NOT NULL);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='local_requires_credentials') THEN
+                    ALTER TABLE org_employees ADD CONSTRAINT local_requires_credentials 
+                        CHECK (auth_type != 'local' OR 
+                               (username IS NOT NULL AND password_hash IS NOT NULL AND display_name IS NOT NULL));
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='username_unique') THEN
+                    ALTER TABLE org_employees ADD CONSTRAINT username_unique UNIQUE (username);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='display_name_per_org') THEN
+                    ALTER TABLE org_employees ADD CONSTRAINT display_name_per_org UNIQUE (org_id, display_name);
+                END IF;
+            END $$;
+        `);
+
         // 8. เพิ่มคอลัมน์เก็บชื่อคนออกรหัสในตาราง wifi_credentials
         await pool.query(`
             ALTER TABLE wifi_credentials 

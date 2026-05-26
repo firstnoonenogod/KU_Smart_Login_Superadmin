@@ -5,6 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { pool, initDb } = require('./database');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = 3000;
@@ -206,27 +207,220 @@ app.post('/api/admin/login', async (req, res) => {
 
 // --- 1. API ดึงรายชื่อพนักงาน ---
 app.get('/api/admin/employees', requireAuth, async (req, res) => {
-    const org_id = req.query.org_id; 
+    const { org_id } = req.query;
+    if (!org_id) return res.status(400).json({ success: false, message: 'ต้องระบุ org_id' });
+    
     try {
-        const result = await pool.query('SELECT * FROM org_employees WHERE org_id = $1 ORDER BY id DESC', [org_id]);
+        const result = await pool.query(
+            `SELECT id, org_id, auth_type, ku_email, username, display_name, 
+                    emp_policy_days, is_active, create_time
+             FROM org_employees 
+             WHERE org_id = $1 
+             ORDER BY auth_type, COALESCE(display_name, ku_email)`,
+            [org_id]
+        );
         res.json({ success: true, data: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        console.error(err);
+        res.status(500).json({ success: false, message: 'โหลดไม่สำเร็จ' });
     }
 });
 
+function generateStaffCredentials() {
+    const username = 'staff_' + crypto.randomBytes(4).toString('hex');
+    const password = crypto.randomBytes(6).toString('base64')
+                            .replace(/[+/=]/g, '').slice(0, 10);
+    return { username, password };
+}
+
+
 // --- 2. API เพิ่มพนักงาน ---
 app.post('/api/admin/employees', requireAuth, async (req, res) => {
-    const { org_id, ku_email, emp_policy_days } = req.body;
+    const { org_id, ku_email, display_name, username, emp_policy_days } = req.body;
+    
+    if (!org_id) return res.status(400).json({ success: false, message: 'ต้องระบุ org_id' });
+    
     try {
-        const orgRes = await pool.query('SELECT user_policy_days FROM organizations WHERE org_id = $1', [org_id]);
-        if (emp_policy_days > orgRes.rows[0].user_policy_days) {
-            return res.status(400).json({ success: false, message: "สิทธิ์จำนวนวัน ต้องไม่เกินสิทธิ์ขององค์กร" });
+        // ตรวจ org type
+        const orgRes = await pool.query('SELECT org_type FROM organizations WHERE org_id = $1', [org_id]);
+        if (orgRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'ไม่พบองค์กรนี้' });
         }
-        await pool.query(`INSERT INTO org_employees (org_id, ku_email, emp_policy_days) VALUES ($1, $2, $3)`, [org_id, ku_email, emp_policy_days]);
-        res.json({ success: true, message: "เพิ่มสิทธิ์พนักงานสำเร็จ" });
+        const isInternal = orgRes.rows[0].org_type;  // true = ภายใน
+        
+        if (isInternal) {
+            // ===== Org ภายใน: ใช้ KU SSO =====
+            if (!ku_email) {
+                return res.status(400).json({ success: false, message: 'ต้องระบุ ku_email สำหรับองค์กรภายใน' });
+            }
+            await pool.query(
+                `INSERT INTO org_employees (org_id, auth_type, ku_email, emp_policy_days)
+                 VALUES ($1, 'ku_sso', $2, $3)`,
+                [org_id, ku_email, emp_policy_days || 1]
+            );
+            return res.json({ success: true, auth_type: 'ku_sso' });
+        } else {
+            // ===== Org ภายนอก: Local Login =====
+            if (!display_name) {
+                return res.status(400).json({ success: false, message: 'ต้องระบุชื่อ (display_name) สำหรับองค์กรภายนอก' });
+            }
+            
+            // Gen username + password (admin แก้ username ได้)
+            const generated = generateStaffCredentials();
+            const finalUsername = (username && username.trim()) ? username.trim() : generated.username;
+            const plainPassword = generated.password;  // จะแสดงให้ admin ครั้งเดียว
+            const passwordHash = await bcrypt.hash(plainPassword, 10);
+            
+            await pool.query(
+                `INSERT INTO org_employees (org_id, auth_type, username, password_hash, display_name, emp_policy_days)
+                 VALUES ($1, 'local', $2, $3, $4, $5)`,
+                [org_id, finalUsername, passwordHash, display_name.trim(), emp_policy_days || 1]
+            );
+            
+            return res.json({
+                success: true,
+                auth_type: 'local',
+                credentials: {
+                    username: finalUsername,
+                    password: plainPassword,  // ✨ แสดงครั้งเดียวเท่านั้น
+                    display_name: display_name.trim()
+                },
+                message: 'สร้างสำเร็จ! โปรดแจ้งรหัสนี้แก่ staff (จะไม่แสดงอีกหลังปิดหน้าต่าง)'
+            });
+        }
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        // จัดการ unique violations
+        if (err.code === '23505') {  // PostgreSQL unique_violation
+            if (err.constraint === 'username_unique') {
+                return res.status(409).json({ success: false, message: 'Username นี้มีในระบบแล้ว' });
+            }
+            if (err.constraint === 'display_name_per_org') {
+                return res.status(409).json({ success: false, message: 'ชื่อนี้มีในองค์กรแล้ว' });
+            }
+            if (err.constraint === 'org_employees_org_id_ku_email_key') {
+                return res.status(409).json({ success: false, message: 'KU email นี้มีในองค์กรแล้ว' });
+            }
+        }
+        console.error('Add employee error:', err);
+        res.status(500).json({ success: false, message: 'เพิ่มไม่สำเร็จ: ' + err.message });
+    }
+});
+
+// Reset password ของ local staff (admin เท่านั้น)
+app.post('/api/admin/employees/:id/reset-password', requireAuth, async (req, res) => {
+    const empId = parseInt(req.params.id);
+    try {
+        const empRes = await pool.query(
+            'SELECT auth_type, username FROM org_employees WHERE id = $1',
+            [empId]
+        );
+        if (empRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'ไม่พบ staff คนนี้' });
+        }
+        if (empRes.rows[0].auth_type !== 'local') {
+            return res.status(400).json({ success: false, message: 'reset password ได้เฉพาะ staff แบบ local' });
+        }
+        
+        // Gen password ใหม่
+        const newPassword = crypto.randomBytes(6).toString('base64')
+                                  .replace(/[+/=]/g, '').slice(0, 10);
+        const newHash = await bcrypt.hash(newPassword, 10);
+        
+        await pool.query(
+            'UPDATE org_employees SET password_hash = $1 WHERE id = $2',
+            [newHash, empId]
+        );
+        
+        res.json({
+            success: true,
+            credentials: {
+                username: empRes.rows[0].username,
+                password: newPassword
+            },
+            message: 'รีเซ็ตรหัสผ่านสำเร็จ - โปรดแจ้ง staff รหัสใหม่นี้'
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'รีเซ็ตไม่สำเร็จ' });
+    }
+});
+
+// Staff Login (สำหรับ org ภายนอก ที่ใช้ username/password)
+app.post('/api/auth/staff-login', async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'กรุณากรอก username และ password' });
+    }
+    
+    try {
+        const result = await pool.query(
+            `SELECT e.id, e.org_id, e.username, e.password_hash, e.display_name, 
+                    e.emp_policy_days, e.is_active,
+                    o.org_name, o.is_active AS org_active,
+                    o.user_policy_days
+             FROM org_employees e
+             JOIN organizations o ON e.org_id = o.org_id
+             WHERE e.username = $1 AND e.auth_type = 'local'`,
+            [username]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(401).json({ success: false, message: 'ไม่พบบัญชีนี้' });
+        }
+        
+        const staff = result.rows[0];
+        if (!staff.is_active) {
+            return res.status(403).json({ success: false, message: 'บัญชีนี้ถูกปิดใช้งาน' });
+        }
+        if (!staff.org_active) {
+            return res.status(403).json({ success: false, message: 'องค์กรนี้ถูกปิดใช้งาน' });
+        }
+        
+        const match = await bcrypt.compare(password, staff.password_hash);
+        if (!match) {
+            return res.status(401).json({ success: false, message: 'รหัสผ่านไม่ถูกต้อง' });
+        }
+        
+        // (Optional) เช็ค access_period สำหรับ org ภายนอก
+        const periodRes = await pool.query(
+            `SELECT 1 FROM org_access_periods 
+             WHERE org_id = $1 AND CURRENT_DATE BETWEEN access_start AND access_end LIMIT 1`,
+            [staff.org_id]
+        );
+        if (periodRes.rows.length === 0) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'องค์กรของคุณไม่อยู่ในช่วงเวลาที่ใช้ระบบได้' 
+            });
+        }
+        
+        // สร้าง JWT
+        const token = jwt.sign(
+            { 
+                staff_id: staff.id,
+                org_id: staff.org_id,
+                username: staff.username,
+                display_name: staff.display_name,
+                auth_type: 'local'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+        
+        res.json({
+            success: true,
+            token,
+            payload: {
+                org_id: staff.org_id,
+                org_name: staff.org_name,
+                display_name: staff.display_name,
+                policy_days: Math.min(staff.emp_policy_days, staff.user_policy_days),
+                auth_type: 'local'
+            }
+        });
+    } catch (err) {
+        console.error('Staff login error:', err);
+        res.status(500).json({ success: false, message: 'ระบบขัดข้อง' });
     }
 });
 

@@ -463,16 +463,30 @@ async function toggleEmployeeRow(orgId) {
         });
         const result = await res.json();
         const tbody = document.getElementById(`emp-tbody-${orgId}`);
+        
         if (!result.success || !result.data || result.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">ยังไม่มีการเพิ่มพนักงานในองค์กรนี้</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">ยังไม่มีพนักงาน</td></tr>';
         } else {
-            tbody.innerHTML = result.data.map(emp => `
-                <tr>
-                    <td class="fw-bold">${emp.ku_email}</td>
-                    <td>${emp.emp_policy_days}</td>
-                    <td class="text-center"><button class="btn btn-sm btn-outline-danger py-0" onclick="deleteEmpFromSuperAdmin(${emp.id}, ${orgId})">ลบสิทธิ์</button></td>
-                </tr>
-            `).join('');
+            tbody.innerHTML = result.data.map(emp => {
+                const isLocal = emp.auth_type === 'local';
+                const identity = isLocal 
+                    ? `<span class="badge bg-warning text-dark">Local</span> ${emp.display_name} <small class="text-muted">(${emp.username})</small>`
+                    : `<span class="badge bg-info">KU SSO</span> ${emp.ku_email}`;
+                
+                const resetBtn = isLocal
+                    ? `<button class="btn btn-sm btn-outline-warning py-0 me-1" onclick="resetStaffPassword(${emp.id}, '${emp.display_name}')">🔑 Reset</button>`
+                    : '';
+                
+                return `<tr>
+                    <td>${identity}</td>
+                    <td>${emp.emp_policy_days} วัน</td>
+                    <td>${emp.is_active ? '✅' : '❌'}</td>
+                    <td class="text-center">
+                        ${resetBtn}
+                        <button class="btn btn-sm btn-outline-danger py-0" onclick="deleteEmpFromSuperAdmin(${emp.id}, ${orgId})">ลบ</button>
+                    </td>
+                </tr>`;
+            }).join('');
         }
     } else {
         row.classList.add('d-none');
@@ -529,28 +543,103 @@ async function loadEmployees() {
     }
 }
 
-document.getElementById('add-employee-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
+async function showAddEmployeeModal(orgId) {
+    // ดึงข้อมูล org เพื่อรู้ว่าภายใน/ภายนอก
+    const orgRes = await fetch(`/api/organizations/${orgId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const orgData = await orgRes.json();
+    if (!orgData.success) return alert('โหลดข้อมูล org ไม่สำเร็จ');
+    
+    const isInternal = orgData.data.org_type;
+    currentOrgId = orgId;
+    
+    if (isInternal) {
+        // === Org ภายใน: ใส่ KU email ===
+        const email = prompt('กรอก KU Email ของพนักงาน (เช่น user@ku.th):');
+        if (!email || !email.trim()) return;
+        const days = parseInt(prompt('จำนวนวันที่ guest ใช้ Wi-Fi ได้ (1-30):', '1')) || 1;
+        
         const res = await fetch('/api/admin/employees', {
-            method: 'POST', 
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // ส่ง Token ไปด้วย
-            },
-            body: JSON.stringify({ org_id: currentOrgId, ku_email: document.getElementById('empEmail').value, emp_policy_days: document.getElementById('empDays').value })
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ org_id: orgId, ku_email: email.trim(), emp_policy_days: days })
         });
         const result = await res.json();
-        if (result.success) { 
-            document.getElementById('empEmail').value = ''; 
-            loadEmployees(); 
-        } else { 
-            alert(result.message); 
+        if (result.success) {
+            alert('เพิ่มสำเร็จ');
+            toggleEmployeeRow(orgId);  // refresh
+            toggleEmployeeRow(orgId);
+        } else {
+            alert('Error: ' + result.message);
         }
-    } catch (e) {
-        alert("เซิร์ฟเวอร์มีปัญหา");
+    } else {
+        // === Org ภายนอก: gen username/password ===
+        const displayName = prompt('กรอกชื่อ Staff (ไม่ซ้ำในองค์กร):');
+        if (!displayName || !displayName.trim()) return;
+        
+        const useDefault = confirm('ให้ระบบ gen Username ให้อัตโนมัติ?\n(กด Cancel เพื่อกำหนดเอง)');
+        let customUsername = null;
+        if (!useDefault) {
+            customUsername = prompt('กำหนด Username (ไม่ซ้ำทั้งระบบ):');
+            if (!customUsername || !customUsername.trim()) return;
+        }
+        
+        const days = parseInt(prompt('จำนวนวันที่ guest ใช้ Wi-Fi ได้ (1-30):', '1')) || 1;
+        
+        const res = await fetch('/api/admin/employees', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ 
+                org_id: orgId, 
+                display_name: displayName.trim(),
+                username: customUsername,
+                emp_policy_days: days 
+            })
+        });
+        const result = await res.json();
+        if (result.success && result.credentials) {
+            // แสดงรหัสครั้งเดียว
+            const msg = `✅ สร้างบัญชีสำเร็จ!\n\n` +
+                       `ชื่อ: ${result.credentials.display_name}\n` +
+                       `Username: ${result.credentials.username}\n` +
+                       `Password: ${result.credentials.password}\n\n` +
+                       `⚠️ โปรดแจ้งรหัสนี้แก่ staff — จะไม่แสดงอีกครั้ง`;
+            
+            // Copy to clipboard
+            const copyText = `Username: ${result.credentials.username}\nPassword: ${result.credentials.password}`;
+            navigator.clipboard.writeText(copyText).then(() => {
+                alert(msg + '\n\n📋 ก็อปไปคลิปบอร์ดแล้ว');
+            }).catch(() => alert(msg));
+            
+            toggleEmployeeRow(orgId);
+            toggleEmployeeRow(orgId);
+        } else {
+            alert('Error: ' + result.message);
+        }
     }
-});
+}
+
+async function resetStaffPassword(empId, displayName) {
+    if (!confirm(`รีเซ็ตรหัสผ่านของ "${displayName}"?`)) return;
+    
+    const res = await fetch(`/api/admin/employees/${empId}/reset-password`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const result = await res.json();
+    if (result.success && result.credentials) {
+        const msg = `🔑 รหัสใหม่:\n\nUsername: ${result.credentials.username}\n` +
+                   `Password: ${result.credentials.password}\n\n` +
+                   `⚠️ แจ้ง staff โดยเร็ว`;
+        navigator.clipboard.writeText(
+            `Username: ${result.credentials.username}\nPassword: ${result.credentials.password}`
+        );
+        alert(msg + '\n\n📋 ก็อปแล้ว');
+    } else {
+        alert('Error: ' + result.message);
+    }
+}
 
 async function deleteEmployee(empId) {
     if(!confirm('ลบสิทธิ์พนักงานคนนี้?')) return;
