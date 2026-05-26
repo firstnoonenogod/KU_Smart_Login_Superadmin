@@ -294,12 +294,12 @@ let currentTimeframe = 'all';
 window.filterUserTimeframe = function(timeframe) {
     currentTimeframe = timeframe;
     const selectedEmp = document.getElementById('employeeSelector').value;
+    const selectedOrg = document.getElementById('orgSelector').value;  // ✨ ใหม่
 
     document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
     const activeButton = document.getElementById(`filter-${timeframe}`);
     if (activeButton) activeButton.classList.add('active');
 
-    // ย้ายการกำหนดวันที่มาไว้ "นอก Loop" เพื่อป้องกันบั๊กวันที่เพี้ยน
     const now = new Date();
     const todayStr = now.toDateString();
     
@@ -326,41 +326,153 @@ window.filterUserTimeframe = function(timeframe) {
     const chartContainer = document.getElementById('emp-chart-container');
     const singleStatContainer = document.getElementById('single-emp-stat');
 
-    // 3. แสดงผลตามการเลือกพนักงาน
     if (selectedEmp === 'all') {
+        // ===== L1 หรือ L2: doughnut chart =====
+        chartContainer.classList.remove('hidden');
         chartContainer.classList.remove('d-none');
+        singleStatContainer.classList.add('hidden');
         singleStatContainer.classList.add('d-none');
         
-        const empCounts = {};
-        uniqueUsersList.forEach(u => {
-            const empName = u.issued_by || 'Admin'; // ป้องกันค่าว่าง
-            empCounts[empName] = (empCounts[empName] || 0) + 1;
-        });
-
-        if (empPerformanceChartInstance) empPerformanceChartInstance.destroy();
-        const ctx = document.getElementById('empPerformanceChart').getContext('2d');
-        empPerformanceChartInstance = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: Object.keys(empCounts),
-                datasets: [{ data: Object.values(empCounts), backgroundColor: ['#006664', '#B2BB1E', '#17a2b8', '#ffc107', '#6c757d'] }]
-            },
-            options: { maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-        });
+        const counts = {};
+        let chartTitle = '';
         
+        if (selectedOrg === 'all') {
+            // 🆕 L1: ทุก org → group by org_name
+            uniqueUsersList.forEach(u => {
+                const key = u.org_name || 'ไม่ระบุองค์กร';
+                counts[key] = (counts[key] || 0) + 1;
+            });
+            chartTitle = 'แยกตามองค์กร';
+        } else {
+            // L2: ราย org → group by staff
+            uniqueUsersList.forEach(u => {
+                const key = u.issued_by || 'Admin';
+                counts[key] = (counts[key] || 0) + 1;
+            });
+            chartTitle = 'แยกตามพนักงาน';
+        }
+        
+        renderDoughnutChart(counts, chartTitle);
         renderAnalyticsTable(uniqueUsersList);
         
     } else {
+        // ===== 🆕 L3: เลือกพนักงานคนเดียว → active vs expired =====
+        chartContainer.classList.add('hidden');
         chartContainer.classList.add('d-none');
+        singleStatContainer.classList.remove('hidden');
         singleStatContainer.classList.remove('d-none');
         
-        // ต้องดักค่าว่างเป็น 'Admin' เพื่อให้กรองตรงกับ Dropdown
-        const myUniqueUsers = uniqueUsersList.filter(u => (u.issued_by || 'Admin') === selectedEmp);
-        document.getElementById('single-emp-count').innerText = myUniqueUsers.length;
+        const myUsers = uniqueUsersList.filter(u => (u.issued_by || 'Admin') === selectedEmp);
         
-        renderAnalyticsTable(myUniqueUsers);
+        const activeUsers = myUsers.filter(u => u.expire_time && new Date(u.expire_time) >= now);
+        const expiredUsers = myUsers.filter(u => !u.expire_time || new Date(u.expire_time) < now);
+        
+        renderActiveInactiveStats(selectedEmp, activeUsers.length, expiredUsers.length);
+        renderAnalyticsTable(myUsers);
     }
 };
+
+// ===== Helper: Doughnut chart (รองรับทั้ง L1 by org และ L2 by staff) =====
+function renderDoughnutChart(counts, titleLabel) {
+    if (empPerformanceChartInstance) empPerformanceChartInstance.destroy();
+    
+    const ctx = document.getElementById('empPerformanceChart');
+    if (!ctx) return;
+    
+    if (Object.keys(counts).length === 0) {
+        // empty state
+        const c = ctx.getContext('2d');
+        c.clearRect(0, 0, ctx.width, ctx.height);
+        c.font = '14px Krub, sans-serif';
+        c.fillStyle = '#94a3b8';
+        c.textAlign = 'center';
+        c.fillText('ยังไม่มีข้อมูล', ctx.width / 2, ctx.height / 2);
+        return;
+    }
+    
+    const palette = ['#006664', '#B2BB1E', '#17a2b8', '#ffc107', '#6c757d', 
+                     '#dc3545', '#fd7e14', '#20c997', '#0d6efd', '#6610f2',
+                     '#198754', '#e83e8c', '#0dcaf0', '#adb5bd'];
+    const colors = Object.keys(counts).map((_, i) => palette[i % palette.length]);
+    
+    empPerformanceChartInstance = new Chart(ctx.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(counts),
+            datasets: [{ 
+                data: Object.values(counts), 
+                backgroundColor: colors,
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: { 
+            maintainAspectRatio: false, 
+            plugins: { 
+                legend: { position: 'right' },
+                title: { display: true, text: titleLabel, font: { size: 13 } }
+            } 
+        }
+    });
+}
+
+// ===== Helper: Active/Expired stats สำหรับ L3 =====
+let singleEmpChartInstance = null;
+function renderActiveInactiveStats(staffName, activeCount, expiredCount) {
+    const total = activeCount + expiredCount;
+    
+    // อัปเดตตัวเลขใหญ่
+    const nameEl = document.getElementById('single-emp-name');
+    const countEl = document.getElementById('single-emp-count');
+    const activeEl = document.getElementById('single-emp-active');
+    const expiredEl = document.getElementById('single-emp-expired');
+    
+    if (nameEl) nameEl.innerText = staffName;
+    if (countEl) countEl.innerText = total;
+    if (activeEl) activeEl.innerText = activeCount;
+    if (expiredEl) expiredEl.innerText = expiredCount;
+    
+    // วาด mini chart
+    const canvas = document.getElementById('singleEmpChart');
+    if (!canvas) return;
+    
+    if (singleEmpChartInstance) singleEmpChartInstance.destroy();
+    
+    if (total === 0) {
+        // empty state
+        const c = canvas.getContext('2d');
+        c.clearRect(0, 0, canvas.width, canvas.height);
+        c.font = '14px Krub, sans-serif';
+        c.fillStyle = '#94a3b8';
+        c.textAlign = 'center';
+        c.fillText('ยังไม่มีการออกรหัส', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+    
+    singleEmpChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['🟢 Active', '🔴 หมดอายุ'],
+            datasets: [{
+                data: [activeCount, expiredCount],
+                backgroundColor: ['#28a745', '#dc3545'],
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                title: { 
+                    display: true, 
+                    text: `สถานะรหัสที่ออกโดย ${staffName}`, 
+                    font: { size: 13 } 
+                }
+            }
+        }
+    });
+}
 
 // 4. ฟังก์ชันวาดรายชื่อข้อมูลผู้ใช้ลงตารางประวัติ
 function renderAnalyticsTable(users) {
