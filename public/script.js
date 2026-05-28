@@ -495,15 +495,15 @@ function renderAnalyticsTable(users) {
             : '-';
             
         tbody.innerHTML += `
-            <tr>
-                <td class="px-4 font-mono text-muted">${maskedIdCard}</td>
-                <td><span class="badge bg-light text-dark border font-mono">${esc(user.username)}</span></td>
-                <td><small class="text-primary fw-semibold">${esc(user.org_name)}</small></td>
-                <td><small>${dateStr}</small></td>
-                <td><span class="badge bg-info text-dark shadow-sm">${esc(user.issued_by || 'Admin')}</span></td> <td><small>${dateStr}</small></td>
-                <td class="text-center">${badge}</td>
-            </tr>
-        `;
+        <tr>
+            <td class="px-4 font-mono text-muted">${maskedIdCard}</td>
+            <td><span class="badge bg-light text-dark border font-mono">${esc(user.username)}</span></td>
+            <td><small class="text-primary fw-semibold">${esc(user.org_name)}</small></td>
+            <td><small>${dateStr}</small></td>
+            <td><span class="badge bg-info text-dark shadow-sm">${esc(user.issued_by || 'Admin')}</span></td>
+            <td class="text-center">${badge}</td>
+        </tr>
+    `;
     });
 }
 
