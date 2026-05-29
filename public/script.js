@@ -491,7 +491,7 @@ function renderAnalyticsTable(users) {
             : '<span class="badge bg-secondary">Inactive</span>';
             
         const maskedIdCard = user.id_card && user.id_card.length === 13 
-            ? user.id_card.substring(0,3) + "-XXXXX-" + user.id_card.substring(10)
+            ?  "X-XXXX-XXXX-" + user.id_card.substring(9,12)
             : '-';
             
         tbody.innerHTML += `
