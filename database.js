@@ -156,6 +156,29 @@ const initDb = async () => {
             ADD COLUMN IF NOT EXISTS issued_by VARCHAR(100) DEFAULT 'Admin';
         `);
 
+        // === 9. ตารางเก็บประวัติการพยายามออก guest ID ทุก attempt ===
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS verification_attempts (
+                id SERIAL PRIMARY KEY,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE CASCADE,
+                id_card VARCHAR(13),
+                guest_name VARCHAR(200),
+                result VARCHAR(30) NOT NULL,
+                issued_by VARCHAR(100),
+                attempt_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_attempts_org_time 
+                ON verification_attempts(org_id, attempt_time DESC);
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_attempts_expires 
+                ON verification_attempts(expires_at);
+        `);
+        console.log("✅ Table verification_attempts ready");
+
         console.log("✅ อัปเกรด PostgreSQL Database Schema ใหม่สำเร็จ");
     } catch (err) {
         console.error("❌ Database Init Error:", err);

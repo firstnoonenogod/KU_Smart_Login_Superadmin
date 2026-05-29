@@ -51,6 +51,34 @@ function requireAuth(req, res, next) {
     }
 }
 
+// คำนวณ expires_at ตามประเภท org
+async function computeAttemptExpiresAt(orgId) {
+    if (!orgId) return null;
+    try {
+        const result = await pool.query(
+            `SELECT o.org_type, ap.access_end 
+             FROM organizations o
+             LEFT JOIN org_access_periods ap ON o.org_id = ap.org_id
+             WHERE o.org_id = $1
+             LIMIT 1`,
+            [orgId]
+        );
+        if (result.rows.length === 0) return null;
+        const { org_type, access_end } = result.rows[0];
+        
+        // Org ภายนอกที่มี access_end → ใช้ access_end
+        if (!org_type && access_end) {
+            return new Date(access_end);
+        }
+        // Default: 90 วันจากตอนนี้
+        const d = new Date();
+        d.setDate(d.getDate() + 90);
+        return d;
+    } catch {
+        return null;
+    }
+}
+
 // ==========================================
 // API สำหรับ Super Admin
 // ==========================================
@@ -473,6 +501,77 @@ function requireInternalKey(req, res, next) {
     next();
 }
 
+
+// บันทึก verification attempt (เรียกจาก Kiosk ทุกครั้งหลัง verify)
+app.post('/api/admin/log-attempt', requireAuth, async (req, res) => {
+    const { org_id, id_card, guest_name, result, issued_by } = req.body;
+    
+    if (!result) return res.status(400).json({ success: false, message: 'ต้องระบุ result' });
+    
+    try {
+        const expiresAt = await computeAttemptExpiresAt(org_id);
+        await pool.query(
+            `INSERT INTO verification_attempts 
+             (org_id, id_card, guest_name, result, issued_by, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [org_id || null, id_card || null, guest_name || null, result, issued_by || 'Admin', expiresAt]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Log attempt error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ดึงประวัติ attempts สำหรับแสดงในตาราง Kiosk
+app.get('/api/admin/attempts', requireAuth, async (req, res) => {
+    const { org_id, range, search, limit } = req.query;
+    
+    if (!org_id) return res.status(400).json({ success: false, message: 'ต้องระบุ org_id' });
+    
+    try {
+        // Build WHERE clause
+        const conditions = ['org_id = $1'];
+        const params = [parseInt(org_id)];
+        let idx = 2;
+        
+        // Filter by range
+        const rangeMap = {
+            'today': "attempt_time >= CURRENT_DATE",
+            'week':  "attempt_time >= CURRENT_DATE - INTERVAL '7 days'",
+            'month': "attempt_time >= CURRENT_DATE - INTERVAL '30 days'",
+            '3month': "attempt_time >= CURRENT_DATE - INTERVAL '90 days'",
+        };
+        if (range && rangeMap[range]) {
+            conditions.push(rangeMap[range]);
+        }
+        
+        // Search by name (case-insensitive partial match)
+        if (search && search.trim()) {
+            conditions.push(`guest_name ILIKE $${idx}`);
+            params.push(`%${search.trim()}%`);
+            idx++;
+        }
+        
+        // เพิ่ม limit (default 200)
+        const limitNum = Math.min(parseInt(limit) || 200, 1000);
+        
+        const query = `
+            SELECT id, id_card, guest_name, result, issued_by, attempt_time
+            FROM verification_attempts
+            WHERE ${conditions.join(' AND ')}
+            ORDER BY attempt_time DESC
+            LIMIT ${limitNum}
+        `;
+        
+        const result = await pool.query(query, params);
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        console.error('Get attempts error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // บันทึกการออกรหัส Wi-Fi (รับข้อมูลจาก Kiosk)
 app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
     const { org_id, username, password, id_card, issued_by } = req.body; 
@@ -734,6 +833,11 @@ setInterval(async () => {
     try {
         const delCreds = await pool.query("DELETE FROM wifi_credentials WHERE expire_time < NOW() - INTERVAL '90 days'");
         
+        // ✨ ลบ attempts ที่หมดอายุ
+        const delAttempts = await pool.query(
+            "DELETE FROM verification_attempts WHERE expires_at IS NOT NULL AND expires_at < NOW()"
+        );
+        
         const disableOrgs = await pool.query(`
             UPDATE organizations SET is_active = false 
             WHERE org_type = false AND org_id IN (
@@ -741,8 +845,8 @@ setInterval(async () => {
             ) AND is_active = true
         `);
         
-        if (delCreds.rowCount > 0 || disableOrgs.rowCount > 0) {
-            console.log(`🧹 Cleanup: รหัสเก่าลบ ${delCreds.rowCount} รายการ, ปิดแอดมินหมดอายุ ${disableOrgs.rowCount} บัญชี`);
+        if (delCreds.rowCount > 0 || delAttempts.rowCount > 0 || disableOrgs.rowCount > 0) {
+            console.log(`🧹 Cleanup: รหัส ${delCreds.rowCount}, attempts ${delAttempts.rowCount}, ปิด admin ${disableOrgs.rowCount}`);
         }
     } catch (err) {
         console.error("Cleanup error:", err);
