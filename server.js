@@ -52,30 +52,38 @@ function requireAuth(req, res, next) {
 }
 
 // คำนวณ expires_at ตามประเภท org
+// คำนวณ expires_at = max(access_end, NOW() + 90 วัน)
 async function computeAttemptExpiresAt(orgId) {
-    if (!orgId) return null;
+    // Default 90 วันจากตอนนี้ (ใช้เป็น floor)
+    const default90 = new Date();
+    default90.setDate(default90.getDate() + 90);
+    
+    if (!orgId) return default90;
+    
     try {
         const result = await pool.query(
-            `SELECT o.org_type, ap.access_end 
+            `SELECT o.org_type, 
+                    (SELECT MAX(access_end) FROM org_access_periods WHERE org_id = o.org_id) AS access_end
              FROM organizations o
-             LEFT JOIN org_access_periods ap ON o.org_id = ap.org_id
-             WHERE o.org_id = $1
-             LIMIT 1`,
+             WHERE o.org_id = $1`,
             [orgId]
         );
-        if (result.rows.length === 0) return null;
+        if (result.rows.length === 0) return default90;
+        
         const { org_type, access_end } = result.rows[0];
         
-        // Org ภายนอกที่มี access_end → ใช้ access_end
+        // org ภายนอก + มี access_end → ใช้ค่าสูงสุดระหว่าง access_end กับ default90
         if (!org_type && access_end) {
-            return new Date(access_end);
+            const accessEndDate = new Date(access_end);
+            // ปรับเป็น end-of-day ของวัน access_end
+            accessEndDate.setHours(23, 59, 59, 999);
+            // เลือกค่าที่มากกว่า (ไกลกว่า)
+            return accessEndDate > default90 ? accessEndDate : default90;
         }
-        // Default: 90 วันจากตอนนี้
-        const d = new Date();
-        d.setDate(d.getDate() + 90);
-        return d;
+        
+        return default90;
     } catch {
-        return null;
+        return default90;
     }
 }
 
@@ -833,9 +841,13 @@ setInterval(async () => {
     try {
         const delCreds = await pool.query("DELETE FROM wifi_credentials WHERE expire_time < NOW() - INTERVAL '90 days'");
         
-        // ✨ ลบ attempts ที่หมดอายุ
+        // Safety net: ลบถ้า attempt เก่ากว่า 90 วัน (ไม่ว่า expires_at จะเป็นอะไร)
+        // + expires_at หมด AND attempt เก่ากว่า 7 วัน (เผื่อ org ภายนอก)
         const delAttempts = await pool.query(
-            "DELETE FROM verification_attempts WHERE expires_at IS NOT NULL AND expires_at < NOW()"
+            `DELETE FROM verification_attempts 
+            WHERE attempt_time < NOW() - INTERVAL '90 days'
+                OR (expires_at IS NOT NULL AND expires_at < NOW() 
+                    AND attempt_time < NOW() - INTERVAL '7 days')`
         );
         
         const disableOrgs = await pool.query(`
