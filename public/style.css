@@ -1,8 +1,18 @@
 /* style.css */
-body {
-    font-family: 'Krub', sans-serif;
-    background-color: #f0f2f5; /* ปรับพื้นหลังให้อ่อนลงเพื่อให้ Card เด่นขึ้น */
-    color: #333;
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap');
+
+/* Apply Prompt ทุก element (override Bootstrap default) */
+*, *::before, *::after {
+    font-family: 'Prompt', sans-serif !important;
+}
+
+body, html {
+    font-family: 'Prompt', sans-serif !important;
+}
+
+/* ยกเว้น monospace (สำหรับเลขบัตร, code) */
+.font-monospace, code, pre, kbd, samp {
+    font-family: 'SFMono-Regular', 'Consolas', 'Courier New', monospace !important;
 }
 
 /* Navbar */
