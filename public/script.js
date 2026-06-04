@@ -15,6 +15,49 @@ function esc(str) {
     }[c]));
 }
 
+// ===== Theme toggle (Light / Dark) =====
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-bs-theme', theme);
+    localStorage.setItem('superadmin-theme', theme);
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-bs-theme') || 'light';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+    
+    // Re-render charts ที่ active อยู่
+    setTimeout(() => {
+        // Destroy เพื่อ force rebuild ด้วยสีใหม่
+        if (globalBarChartInstance) { globalBarChartInstance.destroy(); globalBarChartInstance = null; }
+        if (orgDoughnutChartInstance) { orgDoughnutChartInstance.destroy(); orgDoughnutChartInstance = null; }
+        if (empPerformanceChartInstance) { empPerformanceChartInstance.destroy(); empPerformanceChartInstance = null; }
+        if (singleEmpChartInstance) { singleEmpChartInstance.destroy(); singleEmpChartInstance = null; }
+        
+        // Reset cache เพื่อให้ orgDoughnut rebuild
+        lastActiveCount = null;
+        lastInactiveCount = null;
+        lastHistoryJSON = "";
+        
+        // Reload data
+        fetchOrganizations();   // rebuild globalBarChart
+        const orgSelector = document.getElementById('orgSelector');
+        if (orgSelector && document.getElementById('analytics-panel').classList.contains('active')) {
+            if (typeof loadSelectedOrgAnalytics === 'function') loadSelectedOrgAnalytics();
+        }
+    }, 100);
+}
+
+// Init theme on load (ก่อน DOM render เพื่อกันกระพริบ)
+(function initTheme() {
+    const saved = localStorage.getItem('superadmin-theme') || 'light';
+    applyTheme(saved);
+})();
+
+function getChartTextColor() {
+    return document.documentElement.getAttribute('data-bs-theme') === 'dark' 
+        ? '#cbd5e1' : '#475569';
+}
+
 // 1. ฟังก์ชันดึงสถิติตัวเลขด้านบน
 async function fetchStats() {
     try {
@@ -266,27 +309,6 @@ async function loadStaffDropdown(orgId) {
     }
 }
 
-// ดึงรายชื่อ staff ทั้งหมดในองค์กรเพื่อใส่ใน dropdown
-async function loadStaffDropdown(orgId) {
-    try {
-        const res = await fetch(`/api/dashboard/org/${orgId}/staff`, {
-            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
-        });
-        const result = await res.json();
-        
-        const empSelect = document.getElementById('employeeSelector');
-        empSelect.innerHTML = '<option value="all">แสดงผลงานของทุกคน</option>';
-        
-        if (result.success && Array.isArray(result.staff)) {
-            result.staff.forEach(name => {
-                empSelect.innerHTML += `<option value="${esc(name)}">${esc(name)}</option>`;
-            });
-        }
-    } catch (e) {
-        console.error('โหลด staff dropdown ไม่สำเร็จ:', e);
-    }
-}
-
 // 3. ฟังก์ชันระบบฟิลเตอร์คัดกรองช่วงเวลาผู้ใช้ (วันนี้ / สัปดาห์นี้ / เดือนนี้)
 // ตัวแปรสำหรับจำค่าว่าตอนนี้กำลังเลือกช่วงเวลาไหนอยู่
 let currentTimeframe = 'all';
@@ -406,12 +428,20 @@ function renderDoughnutChart(counts, titleLabel) {
                 borderColor: '#fff'
             }]
         },
-        options: { 
-            maintainAspectRatio: false, 
-            plugins: { 
-                legend: { position: 'right' },
-                title: { display: true, text: titleLabel, font: { size: 13 } }
-            } 
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { 
+                    position: 'right',
+                    labels: { color: getChartTextColor() }
+                },
+                title: { 
+                    display: true, 
+                    text: titleLabel, 
+                    font: { size: 13 },
+                    color: getChartTextColor()
+                }
+            }
         }
     });
 }
@@ -463,11 +493,15 @@ function renderActiveInactiveStats(staffName, activeCount, expiredCount) {
         options: {
             maintainAspectRatio: false,
             plugins: {
-                legend: { position: 'bottom' },
+                legend: { 
+                    position: 'bottom',
+                    labels: { color: getChartTextColor() }
+                },
                 title: { 
                     display: true, 
                     text: `สถานะรหัสที่ออกโดย ${staffName}`, 
-                    font: { size: 13 } 
+                    font: { size: 13 },
+                    color: getChartTextColor()
                 }
             }
         }
@@ -534,8 +568,18 @@ function renderGlobalBarChart(orgs) {
                 responsive: true,
                 indexAxis: 'y',
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { 
+                        beginAtZero: true,
+                        ticks: { stepSize: 1, color: getChartTextColor() }
+                    },
+                    y: { 
+                        ticks: { color: getChartTextColor() }
+                    }
+                }
             }
         });
     }
@@ -571,7 +615,13 @@ function renderOrgDoughnutChart(active, inactive) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'bottom', labels: { boxWidth: 12 } }
+                    legend: { 
+                        position: 'bottom', 
+                        labels: { 
+                            boxWidth: 12,
+                            color: getChartTextColor()
+                        } 
+                    }
                 }
             }
         });

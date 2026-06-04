@@ -83,3 +83,207 @@ body, html {
     border-radius: 15px;
     overflow: hidden;
 }
+
+/* ===========================
+   Theme Toggle Button (Floating)
+   =========================== */
+.theme-toggle-btn {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 1050;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background-color: #fff;
+    color: #64748b;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    opacity: 0.7;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.theme-toggle-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.theme-icon-sun, .theme-icon-moon {
+    width: 24px;
+    height: 24px;
+}
+
+/* Light mode: show sun, hide moon */
+[data-bs-theme="light"] .theme-icon-sun { display: block; }
+[data-bs-theme="light"] .theme-icon-moon { display: none; }
+
+/* Dark mode: hide sun, show moon */
+[data-bs-theme="dark"] .theme-icon-sun { display: none; }
+[data-bs-theme="dark"] .theme-icon-moon { display: block; }
+
+[data-bs-theme="dark"] .theme-toggle-btn {
+    background-color: #162827;
+    color: #B2BB1E;  /* KU accent yellow */
+    border-color: rgba(0,102,100,0.3);
+}
+
+/* ===========================
+   Dark Mode Overrides
+   =========================== */
+[data-bs-theme="dark"] body {
+    background-color: #0D1A19;
+    color: #e0e0e0;
+}
+
+[data-bs-theme="dark"] .ku-navbar {
+    background-color: #003d3c !important;
+}
+
+[data-bs-theme="dark"] .ku-text-green {
+    color: #B2BB1E !important;  /* KU accent */
+}
+
+[data-bs-theme="dark"] .ku-card-primary {
+    border-left-color: #B2BB1E !important;
+}
+
+[data-bs-theme="dark"] .ku-card-secondary {
+    border-left-color: #6c757d !important;
+}
+
+[data-bs-theme="dark"] .ku-card-outline {
+    border-left-color: #28a745 !important;
+}
+
+[data-bs-theme="dark"] .btn-ku {
+    background-color: #B2BB1E;
+    color: #0D1A19;
+}
+
+[data-bs-theme="dark"] .btn-ku:hover {
+    background-color: #c8d121;
+    color: #0D1A19;
+}
+
+[data-bs-theme="dark"] .ku-logo-circle {
+    background-color: #e0e0e0;
+}
+
+/* Card / bg overrides */
+[data-bs-theme="dark"] .bg-white {
+    background-color: #162827 !important;
+}
+
+[data-bs-theme="dark"] .bg-light {
+    background-color: #162827 !important;
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: #162827;
+    color: #e0e0e0;
+    border-color: rgba(0,102,100,0.2);
+}
+
+[data-bs-theme="dark"] .card-header {
+    background-color: #1a3331 !important;
+    border-bottom-color: rgba(0,102,100,0.2);
+}
+
+[data-bs-theme="dark"] .text-muted {
+    color: #94a3b8 !important;
+}
+
+[data-bs-theme="dark"] .text-dark {
+    color: #e0e0e0 !important;
+}
+
+/* Table */
+[data-bs-theme="dark"] .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: #e0e0e0;
+    color: #e0e0e0;
+}
+
+[data-bs-theme="dark"] .table-light {
+    --bs-table-bg: #1a3331;
+    --bs-table-color: #e0e0e0;
+    color: #e0e0e0;
+}
+
+[data-bs-theme="dark"] .table-hover tbody tr:hover {
+    --bs-table-hover-bg: rgba(178, 187, 30, 0.05);
+}
+
+[data-bs-theme="dark"] .table tbody td {
+    color: #cbd5e1;
+    border-color: rgba(0,102,100,0.15);
+}
+
+/* Modal */
+[data-bs-theme="dark"] .modal-content {
+    background-color: #162827;
+    color: #e0e0e0;
+}
+
+[data-bs-theme="dark"] .modal-footer.bg-light {
+    background-color: #1a3331 !important;
+}
+
+/* Form controls */
+[data-bs-theme="dark"] .form-control,
+[data-bs-theme="dark"] .form-select {
+    background-color: #0D1A19;
+    color: #e0e0e0;
+    border-color: rgba(0,102,100,0.3);
+}
+
+[data-bs-theme="dark"] .form-control::placeholder {
+    color: #64748b;
+}
+
+[data-bs-theme="dark"] .form-control:focus,
+[data-bs-theme="dark"] .form-select:focus {
+    background-color: #0D1A19;
+    color: #e0e0e0;
+    border-color: #B2BB1E;
+    box-shadow: 0 0 0 0.2rem rgba(178,187,30,0.15);
+}
+
+[data-bs-theme="dark"] .form-control.bg-light,
+[data-bs-theme="dark"] .form-select.bg-light {
+    background-color: #0D1A19 !important;
+}
+
+/* Alert */
+[data-bs-theme="dark"] .alert-danger {
+    background-color: rgba(220,53,69,0.15);
+    color: #f5b7bd;
+    border-color: rgba(220,53,69,0.3);
+}
+
+/* Border colors */
+[data-bs-theme="dark"] .border,
+[data-bs-theme="dark"] .border-bottom,
+[data-bs-theme="dark"] .border-top {
+    border-color: rgba(0,102,100,0.2) !important;
+}
+
+/* Nav tabs / pills */
+[data-bs-theme="dark"] .nav-link.active {
+    background-color: rgba(178,187,30,0.2) !important;
+    color: #B2BB1E !important;
+}
+
+[data-bs-theme="dark"] .nav-link:not(.active) {
+    color: rgba(255,255,255,0.8);
+}
+
+/* Badge */
+[data-bs-theme="dark"] .badge.bg-info {
+    background-color: rgba(23,162,184,0.2) !important;
+    color: #5bc0de !important;
+}
