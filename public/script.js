@@ -524,8 +524,8 @@ function renderAnalyticsTable(users) {
             ? '<span class="badge bg-success">Active</span>' 
             : '<span class="badge bg-secondary">Inactive</span>';
             
-        const cardMasked = (item.id_card && item.id_card.length === 13) 
-            ? 'X-XXXX-XXXX-' + item.id_card.substring(9)
+        const maskedIdCard = user.id_card && user.id_card.length === 13 
+            ?  "X-XXXX-XXXX-" + user.id_card.substring(9,13)
             : '-';
             
         tbody.innerHTML += `
