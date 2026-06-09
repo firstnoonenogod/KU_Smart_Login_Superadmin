@@ -51,11 +51,11 @@ function requireAuth(req, res, next) {
     }
 }
 
-// AES-256-GCM encryption สำหรับ id_card
+// === PDPA: AES-256-GCM Encryption สำหรับ id_card ===
 function getEncryptionKey() {
     const hex = process.env.ID_CARD_ENCRYPTION_KEY;
     if (!hex || hex.length !== 64) {
-        throw new Error('ID_CARD_ENCRYPTION_KEY ต้องเป็น hex 64 ตัว (32 bytes)');
+        throw new Error('ID_CARD_ENCRYPTION_KEY must be 64 hex chars (32 bytes)');
     }
     return Buffer.from(hex, 'hex');
 }
@@ -68,10 +68,10 @@ function encryptIdCard(idCard) {
         const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
         const ciphertext = Buffer.concat([cipher.update(idCard, 'utf8'), cipher.final()]);
         const authTag = cipher.getAuthTag();
-        // Format: iv(12) | authTag(16) | ciphertext  → base64
+        // Format: iv(12) | authTag(16) | ciphertext → base64
         return Buffer.concat([iv, authTag, ciphertext]).toString('base64');
     } catch (e) {
-        console.error('Encrypt error:', e);
+        console.error('Encrypt error:', e.message);
         return null;
     }
 }
@@ -81,6 +81,7 @@ function decryptIdCard(encoded) {
     try {
         const key = getEncryptionKey();
         const buf = Buffer.from(encoded, 'base64');
+        if (buf.length < 28) return null;
         const iv = buf.subarray(0, 12);
         const authTag = buf.subarray(12, 28);
         const ciphertext = buf.subarray(28);
@@ -89,7 +90,7 @@ function decryptIdCard(encoded) {
         const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
         return plaintext.toString('utf8');
     } catch (e) {
-        console.error('Decrypt error:', e);
+        console.error('Decrypt error:', e.message);
         return null;
     }
 }
@@ -97,6 +98,18 @@ function decryptIdCard(encoded) {
 function getCardPrefix(idCard) {
     if (!idCard || idCard.length !== 13) return null;
     return idCard.substring(0, 5);
+}
+
+// Self-test ตอน start (เพื่อให้แน่ใจว่า key ใช้ได้)
+try {
+    const testCard = '1234567890123';
+    const enc = encryptIdCard(testCard);
+    const dec = decryptIdCard(enc);
+    if (dec !== testCard) throw new Error('Encryption roundtrip failed');
+    console.log('🔐 PDPA encryption key OK');
+} catch (e) {
+    console.error('🔴 PDPA encryption key error:', e.message);
+    console.error('   ตรวจ ID_CARD_ENCRYPTION_KEY ใน .env');
 }
 
 // คำนวณ expires_at ตามประเภท org
@@ -660,12 +673,18 @@ app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
 
         if (existingUser.rows.length > 0) {
             userId = existingUser.rows[0].id;
-            await client.query('UPDATE wifi_users SET username = $1, org_id = $2 WHERE id = $3', [username, org_id, userId]);
+            await client.query(
+                `UPDATE wifi_users 
+                SET username = $1, org_id = $2, card_prefix = $3, card_enc = $4 
+                WHERE id = $5`,
+                [username, org_id, cardPrefix, cardEnc, userId]
+            );
         } else {
-            const newUser = await client.query(`
-                INSERT INTO wifi_users (org_id, card_id, username)
-                VALUES ($1, $2, $3) RETURNING id
-            `, [org_id, id_card, username]);
+            const newUser = await client.query(
+                `INSERT INTO wifi_users (org_id, card_id, username, card_prefix, card_enc)
+                VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [org_id, id_card, username, cardPrefix, cardEnc]
+            );
             userId = newUser.rows[0].id;
         }
 
