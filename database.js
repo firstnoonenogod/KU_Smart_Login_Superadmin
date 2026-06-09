@@ -178,6 +178,48 @@ const initDb = async () => {
                 ON verification_attempts(expires_at);
         `);
         console.log("✅ Table verification_attempts ready");
+        
+        // === 10. PDPA: เพิ่ม encrypted columns สำหรับเลขบัตร ===
+        await pool.query(`
+            ALTER TABLE wifi_users
+                ADD COLUMN IF NOT EXISTS card_prefix VARCHAR(5),
+                ADD COLUMN IF NOT EXISTS card_enc TEXT;
+        `);
+        await pool.query(`
+            ALTER TABLE verification_attempts
+                ADD COLUMN IF NOT EXISTS id_card_prefix VARCHAR(5),
+                ADD COLUMN IF NOT EXISTS id_card_enc TEXT;
+        `);
+        // Index สำหรับค้นด้วย prefix (ถ้าจำเป็น)
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_users_card_prefix 
+                ON wifi_users(card_prefix);
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_attempts_card_prefix 
+                ON verification_attempts(id_card_prefix);
+        `);
+        console.log("✅ Schema PDPA: columns card_prefix, card_enc, id_card_prefix, id_card_enc");
+
+        // === 11. Audit log สำหรับ Super Admin decrypt id_card ===
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS id_card_decrypt_log (
+                id SERIAL PRIMARY KEY,
+                super_admin_user VARCHAR(100) NOT NULL,
+                searched_by_name VARCHAR(200),
+                searched_time_from TIMESTAMP,
+                searched_time_to TIMESTAMP,
+                result_count INTEGER DEFAULT 0,
+                reason TEXT NOT NULL,
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_decrypt_log_created 
+                ON id_card_decrypt_log(created_at DESC);
+        `);
+        console.log("✅ Table id_card_decrypt_log ready");
 
         console.log("✅ อัปเกรด PostgreSQL Database Schema ใหม่สำเร็จ");
     } catch (err) {

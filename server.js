@@ -51,6 +51,56 @@ function requireAuth(req, res, next) {
     }
 }
 
+const crypto = require('crypto');
+
+// AES-256-GCM encryption สำหรับ id_card
+function getEncryptionKey() {
+    const hex = process.env.ID_CARD_ENCRYPTION_KEY;
+    if (!hex || hex.length !== 64) {
+        throw new Error('ID_CARD_ENCRYPTION_KEY ต้องเป็น hex 64 ตัว (32 bytes)');
+    }
+    return Buffer.from(hex, 'hex');
+}
+
+function encryptIdCard(idCard) {
+    if (!idCard) return null;
+    try {
+        const key = getEncryptionKey();
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+        const ciphertext = Buffer.concat([cipher.update(idCard, 'utf8'), cipher.final()]);
+        const authTag = cipher.getAuthTag();
+        // Format: iv(12) | authTag(16) | ciphertext  → base64
+        return Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+    } catch (e) {
+        console.error('Encrypt error:', e);
+        return null;
+    }
+}
+
+function decryptIdCard(encoded) {
+    if (!encoded) return null;
+    try {
+        const key = getEncryptionKey();
+        const buf = Buffer.from(encoded, 'base64');
+        const iv = buf.subarray(0, 12);
+        const authTag = buf.subarray(12, 28);
+        const ciphertext = buf.subarray(28);
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(authTag);
+        const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        return plaintext.toString('utf8');
+    } catch (e) {
+        console.error('Decrypt error:', e);
+        return null;
+    }
+}
+
+function getCardPrefix(idCard) {
+    if (!idCard || idCard.length !== 13) return null;
+    return idCard.substring(0, 5);
+}
+
 // คำนวณ expires_at ตามประเภท org
 // คำนวณ expires_at = max(access_end, NOW() + 90 วัน)
 async function computeAttemptExpiresAt(orgId) {
@@ -518,11 +568,23 @@ app.post('/api/admin/log-attempt', requireAuth, async (req, res) => {
     
     try {
         const expiresAt = await computeAttemptExpiresAt(org_id);
+        const cardPrefix = getCardPrefix(id_card);
+        const cardEnc = encryptIdCard(id_card);
+        
         await pool.query(
-            `INSERT INTO verification_attempts 
-             (org_id, id_card, guest_name, result, issued_by, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [org_id || null, id_card || null, guest_name || null, result, issued_by || 'Admin', expiresAt]
+            `INSERT INTO verification_attempts
+             (org_id, id_card, id_card_prefix, id_card_enc, guest_name, result, issued_by, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+                org_id || null, 
+                id_card || null,        // ⚠️ Phase 1: ยังเก็บ plain ไว้ (Phase 2 จะลบ)
+                cardPrefix, 
+                cardEnc, 
+                guest_name || null, 
+                result, 
+                issued_by || 'Admin', 
+                expiresAt
+            ]
         );
         res.json({ success: true });
     } catch (err) {
@@ -565,7 +627,7 @@ app.get('/api/admin/attempts', requireAuth, async (req, res) => {
         const limitNum = Math.min(parseInt(limit) || 200, 1000);
         
         const query = `
-            SELECT id, id_card, guest_name, result, issued_by, attempt_time
+            SELECT id, id_card_prefix AS id_card, guest_name, result, issued_by, attempt_time
             FROM verification_attempts
             WHERE ${conditions.join(' AND ')}
             ORDER BY attempt_time DESC
@@ -646,6 +708,89 @@ app.post('/api/admin/issue-wifi', requireAuth, async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// ค้นหา + decrypt id_card (Super Admin only, log ทุกครั้ง)
+app.post('/api/admin/audit/search-cards', requireAuth, async (req, res) => {
+    // ต้องเป็น Super Admin JWT (ไม่รับ X-Internal-Key)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: 'ต้องเป็น Super Admin' });
+    }
+    let payload;
+    try {
+        payload = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
+    } catch {
+        return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+    
+    const { search_name, time_from, time_to, reason } = req.body;
+    
+    if (!reason || reason.trim().length < 5) {
+        return res.status(400).json({ success: false, message: 'กรุณาระบุเหตุผล (อย่างน้อย 5 ตัวอักษร)' });
+    }
+    if (!search_name && !time_from && !time_to) {
+        return res.status(400).json({ success: false, message: 'ต้องระบุชื่อหรือช่วงเวลา' });
+    }
+    
+    try {
+        // Build query
+        const conds = [];
+        const params = [];
+        let i = 1;
+        
+        if (search_name && search_name.trim()) {
+            conds.push(`guest_name ILIKE $${i}`);
+            params.push(`%${search_name.trim()}%`); i++;
+        }
+        if (time_from) {
+            conds.push(`attempt_time >= $${i}`);
+            params.push(time_from); i++;
+        }
+        if (time_to) {
+            conds.push(`attempt_time <= $${i}`);
+            params.push(time_to); i++;
+        }
+        
+        const result = await pool.query(
+            `SELECT id, org_id, id_card_enc, id_card_prefix, guest_name, 
+                    result, issued_by, attempt_time
+             FROM verification_attempts
+             WHERE ${conds.join(' AND ')}
+             ORDER BY attempt_time DESC
+             LIMIT 100`,
+            params
+        );
+        
+        // Decrypt id_card ทุก record
+        const decrypted = result.rows.map(r => ({
+            ...r,
+            id_card_full: r.id_card_enc ? decryptIdCard(r.id_card_enc) : null,
+            id_card_enc: undefined  // ไม่ส่ง ciphertext ออก
+        }));
+        
+        // Log audit
+        await pool.query(
+            `INSERT INTO id_card_decrypt_log 
+             (super_admin_user, searched_by_name, searched_time_from, searched_time_to, 
+              result_count, reason, ip_address)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+                payload.username || 'unknown',
+                search_name || null,
+                time_from || null,
+                time_to || null,
+                decrypted.length,
+                reason,
+                req.ip || req.headers['x-forwarded-for'] || null
+            ]
+        );
+        
+        res.json({ success: true, data: decrypted, count: decrypted.length });
+    } catch (err) {
+        console.error('Audit search error:', err);
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
