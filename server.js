@@ -51,8 +51,6 @@ function requireAuth(req, res, next) {
     }
 }
 
-const crypto = require('crypto');
-
 // AES-256-GCM encryption สำหรับ id_card
 function getEncryptionKey() {
     const hex = process.env.ID_CARD_ENCRYPTION_KEY;
