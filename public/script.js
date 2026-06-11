@@ -524,8 +524,8 @@ function renderAnalyticsTable(users) {
             ? '<span class="badge bg-success">Active</span>' 
             : '<span class="badge bg-secondary">Inactive</span>';
             
-        const cardMasked = (item.id_card && item.id_card.length === 5) 
-            ? item.id_card.substring(0,1) + '-' + item.id_card.substring(1) + '-XXXXX-XX-X'
+        const maskedIdCard = user.id_card && user.id_card.length === 5
+            ? user.id_card.substring(0,1) + '-' + user.id_card.substring(1) + '-XXXXX-XX-X'
             : '-';
         // ผลลัพธ์: "1-2345-XXXXX-XX-X"
             
