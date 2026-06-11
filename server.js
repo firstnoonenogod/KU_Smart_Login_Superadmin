@@ -876,7 +876,7 @@ app.get('/api/dashboard/org/:id', requireAuth, async (req, res) => {
 
             historyQuery = await pool.query(`
                 SELECT 
-                    u.card_id as id_card, 
+                    COALESCE(u.card_prefix, LEFT(u.card_id, 5)) as id_card,
                     u.username, 
                     c.create_time as created_at, 
                     c.expire_time,
@@ -902,7 +902,7 @@ app.get('/api/dashboard/org/:id', requireAuth, async (req, res) => {
 
             historyQuery = await pool.query(`
                 SELECT 
-                    u.card_id as id_card, 
+                    COALESCE(u.card_prefix, LEFT(u.card_id, 5)) as id_card,
                     u.username, 
                     c.create_time as created_at, 
                     c.expire_time,
