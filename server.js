@@ -570,7 +570,7 @@ function requireInternalKey(req, res, next) {
     next();
 }
 
-// ========== Verify Admin Credential (สำหรับ Manual Override) ==========
+// ========== Verify Admin Credential (สำหรับ Manual Add User) ==========
 app.post('/api/admin/verify-credential', requireInternalKey, async (req, res) => {
     const { username, password, role, org_id } = req.body;
     
@@ -588,23 +588,29 @@ app.post('/api/admin/verify-credential', requireInternalKey, async (req, res) =>
     }
     
     try {
+        // ===== Super Admin =====
         if (role === 'super_admin') {
-            // เทียบกับ env
-            if (username === process.env.SUPER_ADMIN_USER 
-                && password === process.env.SUPER_ADMIN_PASS) {
-                return res.json({ 
-                    success: true, 
-                    verified_as: 'SUPER_ADMIN',
-                    role: 'super_admin'
+            if (username !== process.env.SUPERADMIN_USER) {
+                return res.status(401).json({ 
+                    success: false, 
+                    message: 'Username หรือ Password ไม่ถูกต้อง' 
                 });
             }
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Super Admin credential ไม่ถูกต้อง' 
+            const isMatch = await bcrypt.compare(password, process.env.SUPERADMIN_PASS);
+            if (!isMatch) {
+                return res.status(401).json({ 
+                    success: false, 
+                    message: 'Username หรือ Password ไม่ถูกต้อง' 
+                });
+            }
+            return res.json({ 
+                success: true, 
+                verified_as: 'SUPER_ADMIN',
+                role: 'super_admin'
             });
         }
         
-        // role === 'org_admin' — ต้องระบุ org_id
+        // ===== Org Admin — ต้องระบุ org_id =====
         if (!org_id) {
             return res.status(400).json({ 
                 success: false, 
@@ -612,9 +618,8 @@ app.post('/api/admin/verify-credential', requireInternalKey, async (req, res) =>
             });
         }
         
-        // เทียบ admin_user + admin_pass_hash ของ org_id นี้เท่านั้น (no cross-org)
         const result = await pool.query(
-            `SELECT admin_user, admin_pass_hash, is_active 
+            `SELECT admin_user, admin_pass, is_active 
              FROM organizations 
              WHERE org_id = $1`,
             [parseInt(org_id)]
