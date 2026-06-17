@@ -178,7 +178,7 @@ const initDb = async () => {
                 ON verification_attempts(expires_at);
         `);
         console.log("✅ Table verification_attempts ready");
-        
+
         // === 10. PDPA: เพิ่ม encrypted columns สำหรับเลขบัตร ===
         await pool.query(`
             ALTER TABLE wifi_users
@@ -220,6 +220,35 @@ const initDb = async () => {
                 ON id_card_decrypt_log(created_at DESC);
         `);
         console.log("✅ Table id_card_decrypt_log ready");
+
+        // === 12. ตาราง manual_overrides สำหรับ audit การออกรหัสแบบ manual ===
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS manual_overrides (
+                id SERIAL PRIMARY KEY,
+                attempt_id INTEGER REFERENCES verification_attempts(id) ON DELETE SET NULL,
+                org_id INTEGER REFERENCES organizations(org_id) ON DELETE CASCADE,
+                id_card_prefix VARCHAR(5),
+                id_card_enc TEXT,
+                guest_name VARCHAR(200),
+                issued_by VARCHAR(100),
+                approved_by VARCHAR(100) NOT NULL,
+                approver_role VARCHAR(20) NOT NULL,
+                reason TEXT NOT NULL,
+                reason_category VARCHAR(50),
+                data_source VARCHAR(20),
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_overrides_created 
+                ON manual_overrides(created_at DESC);
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_overrides_org 
+                ON manual_overrides(org_id, created_at DESC);
+        `);
+        console.log("✅ Table manual_overrides ready");
 
         console.log("✅ อัปเกรด PostgreSQL Database Schema ใหม่สำเร็จ");
     } catch (err) {
