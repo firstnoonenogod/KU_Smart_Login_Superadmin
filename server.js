@@ -668,6 +668,219 @@ app.post('/api/admin/verify-credential', requireInternalKey, async (req, res) =>
     }
 });
 
+// ========== Manual Override: บันทึก guest ที่ออกแบบ manual ==========
+app.post('/api/admin/manual-override', requireInternalKey, async (req, res) => {
+    const {
+        // ข้อมูล admin ที่ approve (verify อีกครั้งใน endpoint นี้ — กัน spoof)
+        approver_username,
+        approver_password,
+        approver_role,        // 'org_admin' | 'super_admin'
+        
+        // ข้อมูล guest
+        org_id,
+        id_card,
+        guest_name,
+        firstname_en,         // optional
+        surname_en,           // optional
+        
+        // ข้อมูล guest ID ที่ได้จาก DB API (Kiosk เรียกแล้ว)
+        guest_id,             // username Wi-Fi
+        guest_password,
+        
+        // Metadata
+        issued_by,            // staff/admin ที่กำลัง login ที่ตู้
+        reason,
+        reason_category,      // 'ai_fail' | 'mask' | 'old_card' | 'no_card' | 'camera' | 'other'
+        data_source           // 'card_reader' | 'manual_input'
+    } = req.body;
+    
+    // ===== Validation =====
+    if (!approver_username || !approver_password || !approver_role) {
+        return res.status(400).json({ success: false, message: 'ต้องระบุข้อมูล admin ที่อนุมัติ' });
+    }
+    if (!org_id || !id_card || !guest_name) {
+        return res.status(400).json({ success: false, message: 'ต้องระบุข้อมูล guest (org_id, id_card, guest_name)' });
+    }
+    if (id_card.length !== 13 || !/^\d{13}$/.test(id_card)) {
+        return res.status(400).json({ success: false, message: 'เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก' });
+    }
+    if (!guest_id || !guest_password) {
+        return res.status(400).json({ success: false, message: 'ต้องระบุ guest_id และ guest_password ที่ได้จาก DB API' });
+    }
+    if (!reason || reason.trim().length < 5) {
+        return res.status(400).json({ success: false, message: 'ต้องระบุเหตุผล (อย่างน้อย 5 ตัวอักษร)' });
+    }
+    if (!['org_admin', 'super_admin'].includes(approver_role)) {
+        return res.status(400).json({ success: false, message: 'approver_role ไม่ถูกต้อง' });
+    }
+    
+    const client = await pool.connect();
+    try {
+        // ===== Step 1: Re-verify admin credential (กัน spoof) =====
+        let adminVerified = false;
+        let approverDisplay = approver_username;
+        
+        if (approver_role === 'super_admin') {
+            if (approver_username === process.env.SUPERADMIN_USER 
+                && await bcrypt.compare(approver_password, process.env.SUPERADMIN_PASS)) {
+                adminVerified = true;
+                approverDisplay = 'SUPER_ADMIN';
+            }
+        } else {
+            // org_admin — ต้องเป็น admin ของ org_id นี้
+            const orgCheck = await client.query(
+                `SELECT admin_user, admin_pass, is_active 
+                 FROM organizations WHERE org_id = $1`,
+                [parseInt(org_id)]
+            );
+            if (orgCheck.rows.length > 0) {
+                const o = orgCheck.rows[0];
+                if (o.is_active 
+                    && o.admin_user === approver_username 
+                    && await bcrypt.compare(approver_password, o.admin_pass)) {
+                    adminVerified = true;
+                }
+            }
+        }
+        
+        if (!adminVerified) {
+            client.release();
+            return res.status(401).json({ 
+                success: false, 
+                message: 'ยืนยันตัวตน admin ไม่สำเร็จ' 
+            });
+        }
+        
+        // ===== Step 2: เริ่ม transaction =====
+        await client.query('BEGIN');
+        
+        // ===== Step 3: PDPA encrypt id_card =====
+        const cardPrefix = getCardPrefix(id_card);
+        const cardEnc = encryptIdCard(id_card);
+        
+        // ===== Step 4: บันทึก verification_attempts (result='manual_override') =====
+        const expiresAt = await computeAttemptExpiresAt(org_id);
+        const attemptInsert = await client.query(
+            `INSERT INTO verification_attempts
+             (org_id, id_card, id_card_prefix, id_card_enc, guest_name, result, issued_by, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            [
+                parseInt(org_id), 
+                id_card,
+                cardPrefix, 
+                cardEnc, 
+                guest_name, 
+                'manual_override', 
+                issued_by || 'Admin', 
+                expiresAt
+            ]
+        );
+        const attemptId = attemptInsert.rows[0].id;
+        
+        // ===== Step 5: บันทึก manual_overrides (audit) =====
+        await client.query(
+            `INSERT INTO manual_overrides
+             (attempt_id, org_id, id_card_prefix, id_card_enc, guest_name, 
+              issued_by, approved_by, approver_role, reason, reason_category, 
+              data_source, ip_address)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [
+                attemptId, 
+                parseInt(org_id), 
+                cardPrefix, 
+                cardEnc, 
+                guest_name,
+                issued_by || 'Admin', 
+                approverDisplay, 
+                approver_role, 
+                reason.trim(), 
+                reason_category || null,
+                data_source || null,
+                req.ip || req.headers['x-forwarded-for'] || null
+            ]
+        );
+        
+        // ===== Step 6: INSERT/UPDATE wifi_users =====
+        const existingUser = await client.query(
+            'SELECT id FROM wifi_users WHERE card_id = $1',
+            [id_card]
+        );
+        let userId;
+        if (existingUser.rows.length > 0) {
+            userId = existingUser.rows[0].id;
+            await client.query(
+                `UPDATE wifi_users 
+                 SET username = $1, org_id = $2, card_prefix = $3, card_enc = $4 
+                 WHERE id = $5`,
+                [guest_id, parseInt(org_id), cardPrefix, cardEnc, userId]
+            );
+        } else {
+            const newUser = await client.query(
+                `INSERT INTO wifi_users (org_id, card_id, username, card_prefix, card_enc)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [parseInt(org_id), id_card, guest_id, cardPrefix, cardEnc]
+            );
+            userId = newUser.rows[0].id;
+        }
+        
+        // ===== Step 7: INSERT/UPDATE wifi_credentials =====
+        const orgInfo = await client.query(
+            'SELECT user_policy_days FROM organizations WHERE org_id = $1',
+            [parseInt(org_id)]
+        );
+        const days = orgInfo.rows[0]?.user_policy_days || 1;
+        const expireTime = new Date();
+        expireTime.setDate(expireTime.getDate() + days);
+        
+        const existingCred = await client.query(
+            'SELECT id FROM wifi_credentials WHERE user_id = $1',
+            [userId]
+        );
+        if (existingCred.rows.length > 0) {
+            await client.query(
+                `UPDATE wifi_credentials
+                 SET password = $1, expire_time = $2, 
+                     create_time = CURRENT_TIMESTAMP, issued_by = $3
+                 WHERE user_id = $4`,
+                [guest_password, expireTime, issued_by || 'Admin', userId]
+            );
+        } else {
+            await client.query(
+                `INSERT INTO wifi_credentials (user_id, password, expire_time, issued_by)
+                 VALUES ($1, $2, $3, $4)`,
+                [userId, guest_password, expireTime, issued_by || 'Admin']
+            );
+        }
+        
+        // ===== Step 8: อัปเดต admin_stat =====
+        await client.query(
+            `INSERT INTO admin_stat (org_id, date, count) 
+             VALUES ($1, CURRENT_DATE, 1)
+             ON CONFLICT (org_id, date) DO UPDATE 
+             SET count = admin_stat.count + 1`,
+            [parseInt(org_id)]
+        );
+        
+        await client.query('COMMIT');
+        
+        console.log(`🔓 Manual Override: ${approverDisplay} (${approver_role}) approved guest ${guest_id} for org=${org_id}, source=${data_source}, reason: ${reason.substring(0, 60)}`);
+        
+        res.json({ 
+            success: true, 
+            message: 'บันทึก Manual Override สำเร็จ',
+            attempt_id: attemptId,
+            approved_by: approverDisplay
+        });
+        
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch {}
+        console.error('Manual Override error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    } finally {
+        client.release();
+    }
+});
+
 // บันทึก verification attempt (เรียกจาก Kiosk ทุกครั้งหลัง verify)
 app.post('/api/admin/log-attempt', requireAuth, async (req, res) => {
     const { org_id, id_card, guest_name, result, issued_by } = req.body;
