@@ -570,6 +570,98 @@ function requireInternalKey(req, res, next) {
     next();
 }
 
+// ========== Verify Admin Credential (สำหรับ Manual Override) ==========
+app.post('/api/admin/verify-credential', requireInternalKey, async (req, res) => {
+    const { username, password, role, org_id } = req.body;
+    
+    if (!username || !password || !role) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'ต้องระบุ username, password, role' 
+        });
+    }
+    if (!['org_admin', 'super_admin'].includes(role)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'role ต้องเป็น org_admin หรือ super_admin' 
+        });
+    }
+    
+    try {
+        if (role === 'super_admin') {
+            // เทียบกับ env
+            if (username === process.env.SUPER_ADMIN_USER 
+                && password === process.env.SUPER_ADMIN_PASS) {
+                return res.json({ 
+                    success: true, 
+                    verified_as: 'SUPER_ADMIN',
+                    role: 'super_admin'
+                });
+            }
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Super Admin credential ไม่ถูกต้อง' 
+            });
+        }
+        
+        // role === 'org_admin' — ต้องระบุ org_id
+        if (!org_id) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'org_admin ต้องระบุ org_id' 
+            });
+        }
+        
+        // เทียบ admin_user + admin_pass_hash ของ org_id นี้เท่านั้น (no cross-org)
+        const result = await pool.query(
+            `SELECT admin_user, admin_pass_hash, is_active 
+             FROM organizations 
+             WHERE org_id = $1`,
+            [parseInt(org_id)]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'ไม่พบองค์กรนี้' 
+            });
+        }
+        
+        const org = result.rows[0];
+        if (!org.is_active) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'องค์กรนี้ถูกระงับการใช้งาน' 
+            });
+        }
+        
+        if (org.admin_user !== username) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'ไม่ใช่ admin ของ org นี้' 
+            });
+        }
+        
+        const match = await bcrypt.compare(password, org.admin_pass);
+        if (!match) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'รหัสผ่านไม่ถูกต้อง' 
+            });
+        }
+        
+        return res.json({ 
+            success: true, 
+            verified_as: username,
+            role: 'org_admin',
+            org_id: parseInt(org_id)
+        });
+        
+    } catch (err) {
+        console.error('Verify credential error:', err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 // บันทึก verification attempt (เรียกจาก Kiosk ทุกครั้งหลัง verify)
 app.post('/api/admin/log-attempt', requireAuth, async (req, res) => {
