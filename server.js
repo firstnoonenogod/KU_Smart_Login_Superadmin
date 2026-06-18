@@ -165,7 +165,7 @@ app.post('/api/superadmin/login', async (req, res) => {
         return res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง" });
     }
     
-    const token = jwt.sign({ role: 'superadmin' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const token = jwt.sign({ role: 'superadmin' }, process.env.JWT_SECRET, { expiresIn: '24h' });
     res.json({ success: true, token: token });
 });
 
@@ -501,7 +501,7 @@ app.post('/api/auth/staff-login', async (req, res) => {
                 auth_type: 'local'
             },
             process.env.JWT_SECRET,
-            { expiresIn: '8h' }
+            { expiresIn: '24h' }
         );
         
         res.json({
@@ -554,7 +554,7 @@ app.get('/api/auth/ku-callback', async (req, res) => {
         if (empCheck.rows.length === 0) return res.status(403).send("คุณไม่ได้รับสิทธิ์ในการใช้งานระบบ Kiosk นี้");
 
         const employeeData = empCheck.rows[0];
-        const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '8h' });
+        const kioskToken = jwt.sign({ role: 'employee', org_id: employeeData.org_id, email: employeeData.ku_email, policy_days: employeeData.emp_policy_days }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         // กลับไปหน้าตู้ Kiosk พอร์ต 8000 ผ่าน localhost
         const KIOSK_PUBLIC_URL = process.env.KIOSK_PUBLIC_URL || 'http://localhost:8000';

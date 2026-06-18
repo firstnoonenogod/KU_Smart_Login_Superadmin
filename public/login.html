@@ -31,6 +31,7 @@
             <small class="text-white-50">KU Wi-Fi SmartLogin</small>
         </div>
         <div class="card-body p-4 bg-white">
+            <div id="login-message" class="alert alert-warning d-none mb-3" role="alert"></div>
             <form id="loginForm">
                 <div class="mb-3">
                     <label class="form-label fw-semibold text-muted">Username</label>
@@ -47,6 +48,19 @@
     </div>
 
     <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const msg = sessionStorage.getItem('login_message');
+            if (msg) {
+                sessionStorage.removeItem('login_message');
+                const el = document.getElementById('login-message');
+                if (el) {
+                    el.textContent = msg;
+                    el.classList.remove('d-none');
+                }
+            }
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        });
+        
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const user = document.getElementById('username').value;

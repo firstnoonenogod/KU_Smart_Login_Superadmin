@@ -4,9 +4,84 @@ let lastHistoryJSON = "";
 let empPerformanceChartInstance = null;
 
 const currentOrgId = sessionStorage.getItem('org_id'); // ดึง ID องค์กรตอนแอดมินล็อกอิน
-const token = sessionStorage.getItem('superAdminToken');
+let token = sessionStorage.getItem('superAdminToken'); 
 if (!token) {
     window.location.href = 'login.html'; 
+}
+
+// ==========================================
+// Auth & Fetch Wrapper
+// ==========================================
+function getToken() {
+    return sessionStorage.getItem('superAdminToken');
+}
+
+function clearAuth() {
+    sessionStorage.removeItem('superAdminToken');
+    sessionStorage.removeItem('login_message');
+}
+
+let _isRedirecting = false; 
+
+function redirectToLogin(reason) {
+
+    if (_isRedirecting) return;
+    _isRedirecting = true;  
+    clearAuth();
+    // ป้องกัน redirect loop
+    if (window.location.pathname.endsWith('login.html')) return;
+    
+    if (reason) {
+        sessionStorage.setItem('login_message', reason);
+    }
+    window.location.href = '/login.html';
+}
+
+/**
+ * Wrapper ของ fetch — auto handle 401/403
+ * ใช้แทน fetch() ทุกที่ที่เรียก /api/admin/*
+ */
+async function authFetch(url, options = {}) {
+    const t = getToken();
+    if (!t) {
+        redirectToLogin('กรุณาเข้าสู่ระบบ');
+        // throw error เพื่อหยุด chain
+        throw new Error('No token');
+    }
+    
+    const opts = {
+        ...options,
+        headers: {
+            ...(options.headers || {}),
+            'Authorization': `Bearer ${t}`
+        }
+    };
+    
+    let res;
+    try {
+        res = await fetch(url, opts);
+    } catch (e) {
+        // Network error — ไม่ใช่ auth error
+        throw e;
+    }
+    
+    if (res.status === 401 || res.status === 403) {
+        // Token หมดอายุหรือไม่มีสิทธิ์
+        redirectToLogin('Session หมดอายุ — กรุณาเข้าสู่ระบบใหม่');
+        throw new Error('Unauthorized');
+    }
+    
+    return res;
+}
+
+// ตรวจ token ตอนเปิดหน้า (ก่อนเริ่มโหลดข้อมูล)
+function ensureAuthenticatedOrRedirect() {
+    const t = getToken();
+    if (!t) {
+        redirectToLogin();
+        return false;
+    }
+    return true;
 }
 
 // ==========================================
@@ -131,9 +206,7 @@ function getChartTextColor() {
 // 1. ฟังก์ชันดึงสถิติตัวเลขด้านบน
 async function fetchStats() {
     try {
-        const res = await fetch('/api/dashboard/stats', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+        const res = await authFetch('/api/dashboard/stats');
         const data = await res.json();
         document.getElementById('stat-orgs').innerText = data.total_orgs;
         document.getElementById('stat-users').innerText = data.total_wifi_users;
@@ -159,9 +232,7 @@ radios.forEach(radio => {
 });
 
 async function fetchOrganizations() {
-    const res = await fetch('/api/organizations', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await authFetch('/api/organizations');
     const orgs = await res.json();
     
     const tbody = document.getElementById('org-table-body');
@@ -230,9 +301,8 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
     deleteModal.hide();
 
     // ดำเนินการลบข้อมูลผ่าน API
-    const res = await fetch(`/api/organizations/${currentDeleteId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+    const res = await authFetch(`/api/organizations/${currentDeleteId}`, {
+        method: 'DELETE'
     });
     
     const result = await res.json();
@@ -259,9 +329,9 @@ document.getElementById('addOrgForm').addEventListener('submit', async (e) => {
         admin_validity_days: orgType === 'external' ? document.getElementById('adminValidity').value : null
     };
 
-    const res = await fetch('/api/organizations', {
+    const res = await authFetch('/api/organizations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' , 'Authorization': `Bearer ${token}`},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
 
@@ -291,6 +361,7 @@ document.getElementById('addOrgForm').addEventListener('submit', async (e) => {
 
 // 6. โหลดข้อมูลสถิติและตารางทันทีเมื่อเปิดหน้าเว็บ
 window.onload = () => {
+    if (!ensureAuthenticatedOrRedirect()) return;
     fetchStats();
     fetchOrganizations();
 };
@@ -306,9 +377,7 @@ let currentLoadedHistory = []; // เก็บประวัติผู้ใ�
 // 1. ฟังก์ชันดึงรายชื่อแอดมินองค์กรทั้งหมดมาใส่ในช่องดรอปดาวน์เลือกข้อมูล
 async function initAnalyticsPage() {
     try {
-        const res = await fetch('/api/organizations', {
-            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
-        });
+        const res = await authFetch('/api/organizations');
         const orgs = await res.json();
         
         const selector = document.getElementById('orgSelector');
@@ -335,9 +404,7 @@ async function initAnalyticsPage() {
 async function loadSelectedOrgAnalytics() {
     const orgId = document.getElementById('orgSelector').value;
     try {
-        const res = await fetch(`/api/dashboard/org/${orgId}`, {
-            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
-        });
+        const res = await authFetch(`/api/dashboard/org/${orgId}`);
         const data = await res.json();
         
         if (data.success) {
@@ -363,9 +430,7 @@ async function loadSelectedOrgAnalytics() {
 // ดึงรายชื่อ staff ทั้งหมดในองค์กรเพื่อใส่ใน dropdown (รวมที่ยังไม่เคยออกรหัส)
 async function loadStaffDropdown(orgId) {
     try {
-        const res = await fetch(`/api/dashboard/org/${orgId}/staff`, {
-            headers: { 'Authorization': `Bearer ${sessionStorage.getItem('superAdminToken')}` }
-        });
+        const res = await authFetch(`/api/dashboard/org/${orgId}/staff`);
         const result = await res.json();
         
         const empSelect = document.getElementById('employeeSelector');
@@ -736,9 +801,7 @@ async function toggleEmployeeRow(orgId) {
     const row = document.getElementById(`emp-row-${orgId}`);
     if (row.classList.contains('d-none')) {
         row.classList.remove('d-none');
-        const res = await fetch(`/api/admin/employees?org_id=${orgId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`/api/admin/employees?org_id=${orgId}`);
         const result = await res.json();
         const tbody = document.getElementById(`emp-tbody-${orgId}`);
         
@@ -775,9 +838,8 @@ async function toggleEmployeeRow(orgId) {
 
 async function deleteEmpFromSuperAdmin(empId, orgId) {
     if(!confirm('ยืนยันการลบสิทธิ์พนักงาน?')) return;
-    await fetch(`/api/admin/employees/${empId}`, { 
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+    await authFetch(`/api/admin/employees/${empId}`, {
+        method: 'DELETE'
     });
     document.getElementById(`emp-row-${orgId}`).classList.add('d-none'); 
     toggleEmployeeRow(orgId); // โหลดใหม่
@@ -790,9 +852,7 @@ async function loadEmployees() {
     if (!currentOrgId) return;
     try {
         // เพิ่ม headers เพื่อส่ง Token ยืนยันตัวตน
-        const res = await fetch(`/api/admin/employees?org_id=${currentOrgId}`, {
-            headers: { 'Authorization': `Bearer ${token}` } 
-        });
+        const res = await authFetch(`/api/admin/employees?org_id=${currentOrgId}`);
         const result = await res.json();
         
         // ดัก Error กรณีไม่มีข้อมูลหรือ Token หมดอายุ
@@ -828,9 +888,7 @@ async function loadEmployees() {
 
 async function showAddEmployeeModal(orgId) {
     // ดึงข้อมูล org เพื่อรู้ว่าภายใน/ภายนอก
-    const orgRes = await fetch(`/api/organizations/${orgId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const orgRes = await authFetch(`/api/organizations/${orgId}`);
     const orgData = await orgRes.json();
     if (!orgData.success) return alert('โหลดข้อมูล org ไม่สำเร็จ');
     
@@ -842,12 +900,13 @@ async function showAddEmployeeModal(orgId) {
         const email = prompt('กรอก KU Email ของพนักงาน (เช่น user@ku.th):');
         if (!email || !email.trim()) return;
         const days = parseInt(prompt('จำนวนวันที่ guest ใช้ Wi-Fi ได้ (1-30):', '1')) || 1;
-        
-        const res = await fetch('/api/admin/employees', {
+
+        const res = await authFetch('/api/admin/employees', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ org_id: orgId, ku_email: email.trim(), emp_policy_days: days })
         });
+
         const result = await res.json();
         if (result.success) {
             alert('เพิ่มสำเร็จ');
@@ -870,9 +929,9 @@ async function showAddEmployeeModal(orgId) {
         
         const days = parseInt(prompt('จำนวนวันที่ guest ใช้ Wi-Fi ได้ (1-30):', '1')) || 1;
         
-        const res = await fetch('/api/admin/employees', {
+        const res = await authFetch('/api/admin/employees', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 org_id: orgId, 
                 display_name: displayName.trim(),
@@ -902,9 +961,8 @@ async function showAddEmployeeModal(orgId) {
 async function resetStaffPassword(empId, displayName) {
     if (!confirm(`รีเซ็ตรหัสผ่านของ "${displayName}"?`)) return;
     
-    const res = await fetch(`/api/admin/employees/${empId}/reset-password`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+    const res = await authFetch(`/api/admin/employees/${empId}/reset-password`, {
+        method: 'POST'
     });
     const result = await res.json();
     if (result.success && result.credentials) {
@@ -923,10 +981,7 @@ async function resetStaffPassword(empId, displayName) {
 async function deleteEmployee(empId) {
     if(!confirm('ลบสิทธิ์พนักงานคนนี้?')) return;
     try {
-        await fetch(`/api/admin/employees/${empId}`, { 
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` } // ส่ง Token ไปด้วย
-        });
+        await authFetch(`/api/admin/employees/${empId}`, { method: 'DELETE' });
         loadEmployees();
     } catch (e) {
         alert("เซิร์ฟเวอร์มีปัญหา");
@@ -935,19 +990,23 @@ async function deleteEmployee(empId) {
 
 if(document.getElementById('employee-table-body')) loadEmployees();
 
+// แก้ block setInterval เดิมท้ายไฟล์
 setInterval(() => {
-    if (!document.body.classList.contains('modal-open')) {
+    if (document.body.classList.contains('modal-open')) return;
+    
+    try {
         const isViewingEmp = document.querySelectorAll('tr[id^="emp-row-"]:not(.d-none)').length > 0;
         
-        fetchStats();
-        
+        fetchStats().catch(() => {});
         if (!isViewingEmp) {
-            fetchOrganizations();
+            fetchOrganizations().catch(() => {});
         }
         
         const selectedOrg = document.getElementById('orgSelector');
         if (selectedOrg && selectedOrg.value) {
-            loadSelectedOrgAnalytics();
+            loadSelectedOrgAnalytics().catch(() => {});
         }
+    } catch (e) {
+        // ignore
     }
 }, 5000);
