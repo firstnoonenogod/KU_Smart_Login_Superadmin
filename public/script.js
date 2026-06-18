@@ -9,6 +9,76 @@ if (!token) {
     window.location.href = 'login.html'; 
 }
 
+// ==========================================
+// Lucide Icon Helpers
+// ==========================================
+function refreshIconsSafe() {
+    if (typeof window.refreshIcons === 'function') {
+        setTimeout(window.refreshIcons, 0);
+    }
+}
+
+// ==========================================
+// Credentials Modal Helpers
+// ==========================================
+let _credModalInstance = null;
+
+function showCredentialsModal({ title, subtitle, displayName, username, password }) {
+    document.getElementById('credModalTitle').querySelector('span').textContent = title || 'สร้างบัญชีสำเร็จ';
+    document.getElementById('credModalSubtitle').textContent = subtitle || 'โปรดบันทึกข้อมูลนี้ — ระบบจะไม่แสดงรหัสผ่านอีกครั้ง';
+    
+    const nameWrap = document.getElementById('credDisplayNameWrap');
+    if (displayName) {
+        nameWrap.style.display = '';
+        document.getElementById('credDisplayName').textContent = displayName;
+    } else {
+        nameWrap.style.display = 'none';
+    }
+    
+    document.getElementById('credUsername').value = username || '';
+    document.getElementById('credPassword').value = password || '';
+    
+    if (!_credModalInstance) {
+        _credModalInstance = new bootstrap.Modal(document.getElementById('credentialsModal'));
+    }
+    _credModalInstance.show();
+    refreshIconsSafe();
+    
+    // Auto-copy username+password
+    const copyText = `Username: ${username}\nPassword: ${password}`;
+    navigator.clipboard.writeText(copyText).catch(() => {});
+}
+
+function copyCredField(elId, btn) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    navigator.clipboard.writeText(el.value).then(() => {
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="check" style="width:16px;height:16px;"></i>';
+        refreshIconsSafe();
+        setTimeout(() => {
+            btn.innerHTML = original;
+            refreshIconsSafe();
+        }, 1500);
+    });
+}
+
+function copyAllCreds() {
+    const u = document.getElementById('credUsername').value;
+    const p = document.getElementById('credPassword').value;
+    navigator.clipboard.writeText(`Username: ${u}\nPassword: ${p}`).then(() => {
+        // small toast
+        const btn = event.target.closest('button');
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="check" style="width:16px;height:16px;"></i> คัดลอกแล้ว';
+        refreshIconsSafe();
+        setTimeout(() => {
+            btn.innerHTML = original;
+            refreshIconsSafe();
+        }, 1500);
+    });
+}
+
 function esc(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -96,6 +166,7 @@ async function fetchOrganizations() {
     
     const tbody = document.getElementById('org-table-body');
     tbody.innerHTML = '';
+    refreshIconsSafe();
     
     orgs.forEach(org => {
         let typeBadge = org.org_type === 'internal' 
@@ -113,7 +184,7 @@ async function fetchOrganizations() {
             <td>ให้ User ละ ${org.user_policy_days} วัน</td>
             <td>${expiryText}</td>
             <td class="text-center">
-                <button class="btn btn-sm btn-info shadow-sm rounded-pill px-3 me-1 text-white" onclick="toggleEmployeeRow(${org.id})">👥 ดูพนักงาน</button>
+                <button class="btn btn-sm btn-info shadow-sm rounded-pill px-3 me-1 text-white d-inline-flex align-items-center gap-1" onclick="toggleEmployeeRow(${org.id})"><i data-lucide="users" style="width:14px;height:14px;"></i> ดูพนักงาน</button>
                 <button class="btn btn-sm btn-primary shadow-sm rounded-pill px-3 me-1" onclick="shortcutToAnalytics(${org.id})">ดูกราฟ</button>
                 <button class="btn btn-sm btn-danger shadow-sm rounded-pill px-3" onclick="deleteOrg(${org.id}, '${org.name}')">ลบ</button>
             </td>
@@ -130,6 +201,7 @@ async function fetchOrganizations() {
             </td>
         </tr>
     `;
+    refreshIconsSafe();
     });
     // สั่งอัปเดตแผนภูมิแท่งเปรียบเทียบยอดหน้าแรกทันที
     renderGlobalBarChart(orgs);
@@ -316,7 +388,7 @@ let currentTimeframe = 'all';
 window.filterUserTimeframe = function(timeframe) {
     currentTimeframe = timeframe;
     const selectedEmp = document.getElementById('employeeSelector').value;
-    const selectedOrg = document.getElementById('orgSelector').value;  // ✨ ใหม่
+    const selectedOrg = document.getElementById('orgSelector').value;
 
     document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
     const activeButton = document.getElementById(`filter-${timeframe}`);
@@ -482,7 +554,7 @@ function renderActiveInactiveStats(staffName, activeCount, expiredCount) {
     singleEmpChartInstance = new Chart(canvas.getContext('2d'), {
         type: 'doughnut',
         data: {
-            labels: ['🟢 Active', '🔴 หมดอายุ'],
+            labels: ['Active', 'หมดอายุ'],
             datasets: [{
                 data: [activeCount, expiredCount],
                 backgroundColor: ['#28a745', '#dc3545'],
@@ -512,9 +584,11 @@ function renderActiveInactiveStats(staffName, activeCount, expiredCount) {
 function renderAnalyticsTable(users) {
     const tbody = document.getElementById('analytics-table-body');
     tbody.innerHTML = '';
+    refreshIconsSafe();
     
     if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">❌ ไม่พบประวัติผู้ใช้งานในช่วงเวลาดังกล่าว</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4"><i data-lucide="x-circle" style="width:16px;height:16px;display:inline;vertical-align:-3px;"></i> ไม่พบประวัติผู้ใช้งานในช่วงเวลาดังกล่าว</td></tr>';
+        refreshIconsSafe();
         return;
     }
     
@@ -539,10 +613,11 @@ function renderAnalyticsTable(users) {
             <td class="text-center">${badge}</td>
         </tr>
     `;
+        refreshIconsSafe();
     });
 }
 
-// 5. 📊 ฟังก์ชันวาดกราฟแท่งเปรียบเทียบแอดมินหน้าแรก (Bar Chart)
+// 5. ฟังก์ชันวาดกราฟแท่งเปรียบเทียบแอดมินหน้าแรก (Bar Chart)
 function renderGlobalBarChart(orgs) {
     const ctx = document.getElementById('globalBarChart').getContext('2d');
     const labels = orgs.map(o => o.name);
@@ -586,7 +661,7 @@ function renderGlobalBarChart(orgs) {
     }
 }
 
-// 6. 🍩 ฟังก์ชันวาดกราฟวงกลมโดนัทสัดส่วนบัตร (Doughnut Chart)
+// 6. ฟังก์ชันวาดกราฟวงกลมโดนัทสัดส่วนบัตร (Doughnut Chart)
 function renderOrgDoughnutChart(active, inactive) {
     const ctx = document.getElementById('orgDoughnutChart').getContext('2d');
     
@@ -669,6 +744,7 @@ async function toggleEmployeeRow(orgId) {
         
         if (!result.success || !result.data || result.data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">ยังไม่มีพนักงาน</td></tr>';
+            refreshIconsSafe();
         } else {
             tbody.innerHTML = result.data.map(emp => {
                 const isLocal = emp.auth_type === 'local';
@@ -677,19 +753,20 @@ async function toggleEmployeeRow(orgId) {
                     : `<span class="badge bg-info">KU SSO</span> ${emp.ku_email}`;
                 
                 const resetBtn = isLocal
-                    ? `<button class="btn btn-sm btn-outline-warning py-0 me-1" onclick="resetStaffPassword(${emp.id}, '${emp.display_name}')">🔑 Reset</button>`
+                    ? `<button class="btn btn-sm btn-outline-warning py-0 me-1 d-inline-flex align-items-center gap-1" onclick="resetStaffPassword(${emp.id}, '${emp.display_name.replace(/'/g, "\\'")}')"><i data-lucide="key-round" style="width:12px;height:12px;"></i> Reset</button>`
                     : '';
                 
                 return `<tr>
                     <td>${identity}</td>
                     <td>${emp.emp_policy_days} วัน</td>
-                    <td>${emp.is_active ? '✅' : '❌'}</td>
+                    <td>${emp.is_active ? '<i data-lucide="check-circle-2" style="width:16px;height:16px;color:#198754;"></i>' : '<i data-lucide="x-circle" style="width:16px;height:16px;color:#dc3545;"></i>'}</td>
                     <td class="text-center">
                         ${resetBtn}
                         <button class="btn btn-sm btn-outline-danger py-0" onclick="deleteEmpFromSuperAdmin(${emp.id}, ${orgId})">ลบ</button>
                     </td>
                 </tr>`;
             }).join('');
+            refreshIconsSafe();
         }
     } else {
         row.classList.add('d-none');
@@ -718,7 +795,7 @@ async function loadEmployees() {
         });
         const result = await res.json();
         
-        // 📌 ดัก Error กรณีไม่มีข้อมูลหรือ Token หมดอายุ
+        // ดัก Error กรณีไม่มีข้อมูลหรือ Token หมดอายุ
         if (!result.success || !result.data) {
             console.error("โหลดข้อมูลพนักงานไม่ได้:", result.message);
             return;
@@ -727,9 +804,11 @@ async function loadEmployees() {
         const tbody = document.getElementById('employee-table-body');
         if (!tbody) return;
         tbody.innerHTML = '';
+        refreshIconsSafe();
 
         if (result.data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted p-4">ยังไม่มีพนักงานในองค์กรนี้</td></tr>';
+            refreshIconsSafe();
             return;
         }
 
@@ -741,6 +820,7 @@ async function loadEmployees() {
                     <td><button class="btn btn-sm btn-danger rounded-pill px-3" onclick="deleteEmployee(${emp.id})">ลบสิทธิ์</button></td>
                 </tr>`;
         });
+            refreshIconsSafe();
     } catch (e) {
         console.error("เชื่อมต่อระบบจัดการพนักงานล้มเหลว", e);
     }
@@ -802,19 +882,15 @@ async function showAddEmployeeModal(orgId) {
         });
         const result = await res.json();
         if (result.success && result.credentials) {
-            // แสดงรหัสครั้งเดียว
-            const msg = `✅ สร้างบัญชีสำเร็จ!\n\n` +
-                       `ชื่อ: ${result.credentials.display_name}\n` +
-                       `Username: ${result.credentials.username}\n` +
-                       `Password: ${result.credentials.password}\n\n` +
-                       `⚠️ โปรดแจ้งรหัสนี้แก่ staff — จะไม่แสดงอีกครั้ง`;
+            showCredentialsModal({
+                title: 'สร้างบัญชี Staff สำเร็จ',
+                subtitle: 'โปรดแจ้งรหัสนี้แก่ staff — ระบบจะไม่แสดงอีกครั้ง',
+                displayName: result.credentials.display_name,
+                username: result.credentials.username,
+                password: result.credentials.password
+            });
             
-            // Copy to clipboard
-            const copyText = `Username: ${result.credentials.username}\nPassword: ${result.credentials.password}`;
-            navigator.clipboard.writeText(copyText).then(() => {
-                alert(msg + '\n\n📋 ก็อปไปคลิปบอร์ดแล้ว');
-            }).catch(() => alert(msg));
-            
+            // Refresh employee list (ปิด+เปิด)
             toggleEmployeeRow(orgId);
             toggleEmployeeRow(orgId);
         } else {
@@ -832,13 +908,13 @@ async function resetStaffPassword(empId, displayName) {
     });
     const result = await res.json();
     if (result.success && result.credentials) {
-        const msg = `🔑 รหัสใหม่:\n\nUsername: ${result.credentials.username}\n` +
-                   `Password: ${result.credentials.password}\n\n` +
-                   `⚠️ แจ้ง staff โดยเร็ว`;
-        navigator.clipboard.writeText(
-            `Username: ${result.credentials.username}\nPassword: ${result.credentials.password}`
-        );
-        alert(msg + '\n\n📋 ก็อปแล้ว');
+        showCredentialsModal({
+            title: 'รีเซ็ตรหัสผ่านสำเร็จ',
+            subtitle: 'รหัสผ่านใหม่ — โปรดแจ้ง staff โดยเร็ว',
+            displayName: displayName,
+            username: result.credentials.username,
+            password: result.credentials.password
+        });
     } else {
         alert('Error: ' + result.message);
     }
